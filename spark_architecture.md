@@ -30,7 +30,7 @@ Now I want to run a Spark application on this cluster. So I will use the spark-s
 
 ### Understanding Containers
 
-But what is the container? A container is an isolated virtual runtime environment. It comes with some CPU and memory allocation. For example, let's assume YARN RM gave 4 CPU cores and 16 GB memory to this container and started it on a worker node. The worker node has got 16 CPU cores and 64 GB of memory, but YARN RM took 4 CPU cores and 16 GB memory and gave it to my container. Now my application's main() method will run in the container, and it can use 4 CPU cores and 16 GB memory. Make sense?
+But what is the container? A container is an isolated virtual runtime environment. It comes with some CPU and memory allocation. For example, let's assume YARN RM gave 4 CPU cores and 16 GB memory to this container and started it on a worker node. The worker node has got 16 CPU cores and 64 GB of memory, but YARN RM took 4 CPU cores and 16 GB memory and gave it to my container. Now my application's main() method will run in the container, and it can use 4 CPU cores and 16 GB memory.
 
 ## Inside the Container
 
