@@ -1,431 +1,63 @@
 # Apache Spark Runtime Architecture
 
-## 📚 Introduction
+Welcome back. In this video, I will talk about Apache Spark Runtime Architecture. So let's start.
 
-Apache Spark is a distributed computing platform where **every Spark application is a distributed application in itself**. This comprehensive guide explains the complete runtime architecture of Apache Spark applications.
+Apache Spark is a distributed computing platform. However, every Spark application is a distributed application in itself. I will explain that in a minute, but remember, every Spark application is a distributed application in itself.
 
-> 🔑 **Key Concept**: Every Spark application is a distributed application that runs across multiple machines in a cluster!
+Great! A distributed application runs on a cluster, so you need a cluster for your Spark application. You can run it on your local machine for development and unit testing, but ultimately your Spark application runs on a production cluster.
 
----
+We have two most commonly used cluster technologies for Spark:
+- Hadoop YARN cluster
+- Kubernetes cluster
 
-## 🖥️ Understanding Clusters
+We have a few more such as Mesos and Spark Standalone cluster, but these two cover more than 90% market share. Make sense?
 
-### What is a Cluster?
+Now let's start with the following question: What is a cluster?
 
-A cluster is a pool of networked physical computers working together as a single system.
+A cluster is a pool of physical computers. For example, I may have a cluster of 10 machines. Each machine in this example cluster comes with 16 CPU cores and 64 GB RAM. They are networked, and we created a cluster of all these ten machines using the Hadoop YARN cluster manager. The entire pool is termed as a cluster, and individual machines are known as worker nodes. So I have a cluster of 10 worker nodes.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    CLUSTER OVERVIEW                         │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│   Worker 1      Worker 2      Worker 3    ...   Worker 10  │
-│   16 cores      16 cores      16 cores          16 cores   │
-│   64 GB RAM     64 GB RAM     64 GB RAM         64 GB RAM  │
-│                                                             │
-│   Total Capacity: 160 CPU cores + 640 GB RAM               │
-└─────────────────────────────────────────────────────────────┘
-```
+What is the total capacity of my cluster? I have ten workers, each with 16 CPU cores and 64 GB RAM. So my total CPU capacity is 160 CPU cores, and the RAM capacity is 640 GB. Make sense?
 
-### Cluster Components
+Now I want to run a Spark application on this cluster. So I will use the spark-submit command and submit my Spark application to the cluster. My request will go to the YARN resource manager. The YARN RM will create one Application Master container on a worker node and start my application's main() method in the container.
 
-- **Worker Nodes**: Individual machines in the cluster
-- **Resources**: CPU cores and memory available on each node
-- **Cluster Manager**: YARN Resource Manager or Kubernetes Master
+But what is the container? A container is an isolated virtual runtime environment. It comes with some CPU and memory allocation. For example, let's assume YARN RM gave 4 CPU cores and 16 GB memory to this container and started it on a worker node. The worker node has got 16 CPU cores and 64 GB of memory, but YARN RM took 4 CPU cores and 16 GB memory and gave it to my container. Now my application's main() method will run in the container, and it can use 4 CPU cores and 16 GB memory. Make sense?
 
-### Supported Cluster Technologies
+Great! Now let's go inside the container and see what happens there. The container is running the main() method of my application, right? And we have two possibilities here:
+- PySpark Application
+- Scala Application
 
-| Technology | Market Share | Usage |
-|------------|--------------|-------|
-| **Hadoop YARN** | ~50% | Most common, mature ecosystem |
-| **Kubernetes** | ~40% | Cloud-native, growing rapidly |
-| Apache Mesos | <5% | Declining usage |
-| Spark Standalone | <5% | Development/testing |
+My main method could be a PySpark application, or it could be a Scala application, right? Spark comes in two commonly used flavors.
 
-> 💡 **Note**: YARN and Kubernetes cover more than 90% of production deployments
+So let's assume my application is a PySpark application. But Spark is written in Scala, and it runs in the Java virtual machine. What does it mean? Let me explain.
 
----
-
-## 🚀 How Spark Applications Run
-
-### Application Submission Process
-
-```mermaid
-graph LR
-    A[spark-submit] --> B[YARN Resource Manager]
-    B --> C[Creates AM Container]
-    C --> D[Starts main() method]
-```
-
-### Step-by-Step Execution
-
-1. **Submit Application**
-   ```bash
-   spark-submit --master yarn myapp.py
-   ```
+Spark was written in Scala. Scala is a JVM language, and it always runs in the JVM. But the Spark developers wanted to bring this to Python developers. So they created a Java wrapper on top of the Scala code, and then they created a Python wrapper on top of the Java wrappers. And this Python wrapper is known as PySpark. Make sense?
 
-2. **Container Creation**
-   - YARN creates Application Master (AM) container
-   - Allocates resources (e.g., 4 cores, 16 GB RAM)
-   - Starts on an available worker node
+Great! So I have Python code in my main() method. This Python code is designed to start a Java main() method internally. So my PySpark application will start a JVM application. Once we have a JVM application, the PySpark wrapper will call the Java wrapper using the Py4J connection.
 
-3. **Application Startup**
-   - Main() method begins execution
-   - Driver initializes within container
-
----
-
-## 📦 Understanding Containers
-
-### What is a Container?
-
-A **container** is an isolated virtual runtime environment with allocated CPU and memory resources.
-
-```
-Worker Node (Total: 16 cores, 64 GB RAM)
-│
-├── AM Container
-│   ├── Allocated: 4 cores, 16 GB RAM
-│   ├── Running: Application Driver
-│   └── Isolated from other processes
-│
-└── Available: 12 cores, 48 GB RAM
-```
-
-### Container Properties
-
-- ✅ Isolated runtime environment
-- ✅ Fixed resource allocation
-- ✅ Cannot exceed allocated resources
-- ✅ Managed by cluster manager
-
----
-
-## 🎯 Driver Architecture
-
-### PySpark Application Architecture
-
-```
-┌─────────────────────────────────────────┐
-│          AM Container                   │
-├─────────────────────────────────────────┤
-│                                         │
-│   ┌─────────────────────┐              │
-│   │   PySpark Driver    │              │
-│   │   (Python Process)  │              │
-│   └──────────┬──────────┘              │
-│              │                          │
-│          Py4J Bridge                    │
-│              │                          │
-│              ▼                          │
-│   ┌─────────────────────┐              │
-│   │  Application Driver │              │
-│   │   (JVM Process)     │              │
-│   └─────────────────────┘              │
-│                                         │
-└─────────────────────────────────────────┘
-```
-
-#### How PySpark Works
-
-1. **PySpark Layer**: Python wrapper over Scala/Java code
-2. **Py4J Connection**: Enables Python → Java communication
-3. **JVM Layer**: Actual Spark execution happens here
-
-> 🔍 **Deep Dive**: PySpark is not a reimplementation of Spark in Python. It's a Python API that communicates with the JVM-based Spark engine.
-
-### Scala/Java Application Architecture
-
-```
-┌─────────────────────────────────────────┐
-│          AM Container                   │
-├─────────────────────────────────────────┤
-│                                         │
-│   ┌─────────────────────┐              │
-│   │  Application Driver │              │
-│   │   (JVM Process)     │              │
-│   │                     │              │
-│   │   Direct Spark      │              │
-│   │   Execution         │              │
-│   └─────────────────────┘              │
-│                                         │
-└─────────────────────────────────────────┘
-```
-
-#### Advantages of Scala/Java
-
-- ✅ No translation overhead
-- ✅ Direct JVM execution
-- ✅ Better performance
-- ✅ Full Spark API access
-
----
-
-## ⚡ Distributed Processing with Executors
-
-### How Executors are Created
-
-```
-Driver Process
-    │
-    ├── 1. Request containers from YARN
-    │
-    ├── 2. YARN allocates containers
-    │
-    └── 3. Start executors in containers
-        │
-        ├── Executor 1 (4 cores, 16 GB)
-        ├── Executor 2 (4 cores, 16 GB)
-        ├── Executor 3 (4 cores, 16 GB)
-        └── Executor 4 (4 cores, 16 GB)
-```
-
-### Distributed Application Architecture
-
-```
-┌───────────────────────────────────────────────────────────┐
-│                   SPARK APPLICATION                       │
-├───────────────────────────────────────────────────────────┤
-│                                                           │
-│   ┌─────────────┐         Task Assignment                │
-│   │   DRIVER    │ ◄──────────────────────────┐           │
-│   │  (Control)  │                            │           │
-│   └──────┬──────┘                            │           │
-│          │                                    │           │
-│          ├──────────────┬─────────────┬──────┴────────┐  │
-│          ▼              ▼             ▼               ▼  │
-│   ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐
-│   │ EXECUTOR 1 │ │ EXECUTOR 2 │ │ EXECUTOR 3 │ │ EXECUTOR 4 │
-│   │            │ │            │ │            │ │            │
-│   │ Process    │ │ Process    │ │ Process    │ │ Process    │
-│   │ Data       │ │ Data       │ │ Data       │ │ Data       │
-│   └────────────┘ └────────────┘ └────────────┘ └────────────┘
-│                                                           │
-└───────────────────────────────────────────────────────────┘
-```
-
-### Roles and Responsibilities
-
-#### Driver Responsibilities
-- 📋 Creates execution plan
-- 📊 Schedules tasks on executors
-- 🔍 Monitors executor health
-- 📈 Tracks job progress
-- ❌ Does NOT process data
-
-#### Executor Responsibilities
-- 💪 Performs actual data processing
-- 💾 Stores intermediate data
-- 🔄 Executes assigned tasks
-- 📡 Reports status to driver
-- 🚀 Runs in parallel with other executors
-
----
-
-## 🔧 Runtime Architecture Variations
-
-### 1. Spark DataFrame API (Scala/Java)
-
-**Most Efficient Architecture**
-
-```
-Application Structure:
-├── Driver (JVM)
-└── Executors (JVM only)
-    ├── Executor 1
-    ├── Executor 2
-    └── Executor N
-
-✅ No translation overhead
-✅ Native JVM execution
-✅ Best performance
-```
-
-### 2. PySpark DataFrame API
-
-**Standard PySpark Architecture**
-
-```
-Application Structure:
-├── PySpark Driver (Python)
-│   └── connects via Py4J to →
-├── Application Driver (JVM)
-└── Executors (JVM only)
-    ├── Executor 1
-    ├── Executor 2
-    └── Executor N
-
-⚡ DataFrame operations translated to JVM
-⚡ No Python workers needed
-⚡ Good performance
-```
-
-### 3. PySpark with Python UDFs or Custom Libraries
-
-**Extended Architecture with Python Workers**
-
-```
-Application Structure:
-├── PySpark Driver (Python)
-│   └── connects via Py4J to →
-├── Application Driver (JVM)
-└── Executors (JVM + Python Workers)
-    ├── Executor 1
-    │   ├── JVM Process
-    │   └── Python Worker
-    ├── Executor 2
-    │   ├── JVM Process
-    │   └── Python Worker
-    └── Executor N
-        ├── JVM Process
-        └── Python Worker
-
-⚠️ Additional overhead for Python execution
-⚠️ Data serialization between JVM ↔ Python
-⚠️ Required for custom Python code
-```
-
----
-
-## 🐍 Python Workers Explained
-
-### When are Python Workers Needed?
-
-| Scenario | Python Worker Required? | Reason |
-|----------|------------------------|---------|
-| PySpark DataFrame API | ❌ No | Translated to JVM operations |
-| Python UDFs | ✅ Yes | Custom Python code execution |
-| NumPy/Pandas operations | ✅ Yes | Python-specific libraries |
-| Custom ML libraries | ✅ Yes | Non-Spark Python code |
-| Basic SQL operations | ❌ No | Executed in JVM |
-
-### Performance Impact
-
-```
-Data Flow with Python Workers:
-
-JVM Executor → Serialize Data → Python Worker
-                                      ↓
-                                Process in Python
-                                      ↓
-JVM Executor ← Deserialize ← Return Results
-
-⚠️ Serialization overhead can be significant!
-```
-
----
-
-## 📖 Key Terminology Reference
-
-| Term | Description | Example |
-|------|-------------|---------|
-| **Cluster** | Pool of networked computers | 10-node Hadoop cluster |
-| **Worker Node** | Individual machine in cluster | 16 cores, 64 GB RAM |
-| **Container** | Isolated runtime environment | 4 cores, 16 GB allocation |
-| **AM Container** | Application Master container | Runs the driver |
-| **Driver** | Control program of Spark app | Schedules and monitors |
-| **Executor** | Worker process for data | Processes partitions |
-| **PySpark Driver** | Python entry point | Your .py file |
-| **Application Driver** | JVM driver process | Always present |
-| **Python Worker** | Python runtime in executor | For UDFs |
-| **Py4J** | Python-to-Java bridge | Communication layer |
-
----
-
-## 🎯 Important Points to Remember
-
-### Core Concepts
-
-1. **Distributed by Design**
-   - Every Spark application splits work across multiple executors
-   - Parallelism is automatic and fundamental
-
-2. **Driver vs Executors**
-   - Driver = Brain (manages)
-   - Executors = Muscles (process)
-
-3. **PySpark Architecture**
-   - Always requires JVM underneath
-   - It's a wrapper, not a reimplementation
-
-4. **Resource Isolation**
-   - Containers enforce strict limits
-   - Apps cannot exceed allocated resources
-
-5. **Python Workers**
-   - Only spawned when needed
-   - Add serialization overhead
-
----
-
-## 💡 Best Practices
-
-### Resource Configuration
-
-```yaml
-Recommended Executor Configuration:
-- Cores per executor: 4-8
-- Memory per executor: 8-16 GB
-- Leave 1 core & 1-2 GB for OS
-- Don't create too many small executors
-```
-
-### Performance Optimization
-
-1. **Minimize Python UDFs**
-   - Use built-in Spark functions when possible
-   - Vectorized UDFs (Pandas UDFs) are more efficient
-
-2. **Resource Planning**
-   ```
-   Example for 16-core, 64 GB node:
-   - OS/Services: 1 core, 4 GB
-   - Available: 15 cores, 60 GB
-   - Config: 3 executors × 5 cores × 20 GB
-   ```
-
-3. **Monitoring**
-   - Track driver memory usage
-   - Monitor executor failures
-   - Check for data skew
-
-4. **Development Workflow**
-   - Test locally with `local[*]`
-   - Validate on small cluster
-   - Scale to production cluster
-
----
-
-## 🔄 Complete Execution Flow
-
-```mermaid
-graph TD
-    A[spark-submit] --> B[YARN Resource Manager]
-    B --> C[Create AM Container]
-    C --> D[Start Driver]
-    D --> E[Request Executor Containers]
-    E --> F[Start Executors]
-    F --> G[Driver Assigns Tasks]
-    G --> H[Executors Process Data]
-    H --> I[Return Results to Driver]
-    I --> J[Driver Aggregates Results]
-    J --> K[Application Complete]
-```
-
----
-
-## 📚 Summary
-
-Apache Spark's runtime architecture is designed for distributed processing at scale. Understanding these components helps you:
-
-- ✅ Design efficient applications
-- ✅ Troubleshoot performance issues
-- ✅ Configure resources optimally
-- ✅ Choose the right APIs for your use case
-
-Remember: **Every Spark application is a distributed application**, and this architecture enables processing massive datasets that wouldn't fit on a single machine.
-
----
-
-*Last Updated: [Current Date]*
-*Version: 1.0*
+What is Py4J? Py4J allows a Python application to call a Java application. And that's how PySpark works. It will always start a JVM application and call Spark APIs in the JVM. The actual Spark application is always a Scala application running in the JVM, but PySpark is calling Java wrapper using Py4J, and the Java wrapper runs Scala code in the JVM. Make sense?
+
+Great! What do we call these two things? The PySpark main method is my PySpark Driver, and the JVM application here is my Application Driver. These two terms are critical to remember. So your Spark application driver is the main method of your application. If you wrote a PySpark application, you would have a PySpark driver and an application driver. But if you wrote it in Scala, you won't have a PySpark driver, but you will always have an application driver. Make sense?
+
+Great! In the lecture earlier, I told you that your Spark application is a distributed application in itself, right? So what did I mean? Let me explain.
+
+Your application driver distributes the work to others. So the driver does not perform any data processing work. Instead, it will create some executors and get the work done from them. But how does it happen?
+
+After starting, the driver will go back to the YARN RM and ask for some more containers. The RM will create some more containers on worker nodes and give them to the driver. So let's assume we got four new containers, and let's assume each container comes with 4 CPU cores and 16 GB of memory. Now the driver will start Spark executors in these containers. Each container will run one Spark executor, and the Spark executor is a JVM application.
+
+So your driver is a JVM application, and your executor is also a JVM application. These executors are responsible for doing all the data processing work. The driver will assign work to the executors, monitor them, and manage the overall application, but the executors do all the data processing. Make sense?
+
+Great! So let's quickly revise some terminologies. You have a container that runs the driver. This container is also known as Application Master or AM Container. The AM container runs a Spark driver. If you submitted the PySpark code, you would have a PySpark driver, and you will also have a JVM driver. These two will communicate using Py4J. If you started a Scala or a Java application, you would have a JVM driver only.
+
+The driver will start first, and then it will request the Cluster RM for more containers. On receiving new containers, the driver will start executors in these new containers. We call them executor containers. The AM container, as well as the executor containers, will run on the worker nodes. Your worker node may have a physical CPU and memory, but your driver and executor can use the CPU and memory given to the container. They cannot use extra CPU or memory from the workers. Make sense?
+
+Great! One last thing. If you are using Spark DataFrame API in Scala or Java, your runtime architecture looks like this: You will have one JVM driver and one or more JVM executors.
+
+If you are using PySpark DataFrame APIs, your runtime architecture looks like this: You will have one PySpark driver, one JVM driver, and one or more JVM executors.
+
+But if you are also using some additional Python libraries that are not part of the PySpark, then your runtime architecture looks like this. Even if you are creating UDFs in Python, your runtime architecture will look like this. So what is the difference? You have a Python worker at each executor.
+
+What is a Python Worker, and why do we need them? Python worker is a Python runtime environment, and you need them only if you are using some Python-specific code or libraries. PySpark is a wrapper on Java code, so as long as you are using only PySpark, you do not need a Python runtime environment. All the PySpark code is translated into Java code, and it runs in the JVM.
+
+But if you are using some Python libraries which don't have a Java wrapper, you will need a Python runtime environment to run them. So the executors will create a Python runtime environment so they can execute your Python code. I will talk more about this in a later video, but for now, let's remember that you may have Python workers inside the executor container for running custom Python code outside the PySpark API. Make sense?
+
+Great! That's all for Spark Cluster. See you again! Keep learning and keep growing!
