@@ -7,7 +7,6 @@ Apache Spark is a distributed computing platform. However, every Spark applicati
 A distributed application runs on a cluster, so you need a cluster for your Spark application. You can run it on your local machine for development and unit testing, but ultimately your Spark application runs on a production cluster.
 
 ### Cluster Technologies
-
 We have two most commonly used cluster technologies for Spark:
 - Hadoop YARN cluster
 - Kubernetes cluster
@@ -15,22 +14,18 @@ We have two most commonly used cluster technologies for Spark:
 We have a few more such as Mesos and Spark Standalone cluster, but these two cover more than 90% market share. Make sense?
 
 ## What is a Cluster?
-
 Now let's start with the following question: What is a cluster?
 
 A cluster is a pool of physical computers. For example, I may have a cluster of 10 machines. Each machine in this example cluster comes with 16 CPU cores and 64 GB RAM. They are networked, and we created a cluster of all these ten machines using the Hadoop YARN cluster manager. The entire pool is termed as a cluster, and individual machines are known as worker nodes. So I have a cluster of 10 worker nodes.
 
 ### Cluster Capacity Calculation
-
 What is the total capacity of my cluster? I have ten workers, each with 16 CPU cores and 64 GB RAM. So my total CPU capacity is 160 CPU cores, and the RAM capacity is 640 GB. Make sense?
 
 ## Running a Spark Application
-
 Now I want to run a Spark application on this cluster. So I will use the spark-submit command and submit my Spark application to the cluster. My request will go to the YARN resource manager. The YARN RM will create one Application Master container on a worker node and start my application's main() method in the container.
 
 ### Understanding Containers
-
-But what is the container? A container is an isolated virtual runtime environment. It comes with some CPU and memory allocation. For example, let's assume YARN RM gave 4 CPU cores and 16 GB memory to this container and started it on a worker node. The worker node has got 16 CPU cores and 64 GB of memory, but YARN RM took 4 CPU cores and 16 GB memory and gave it to my container. Now my application's main() method will run in the container, and it can use 4 CPU cores and 16 GB memory.
+A container is an isolated virtual runtime environment. It comes with some CPU and memory allocation. For example, let's assume YARN RM gave 4 CPU cores and 16 GB memory to this container and started it on a worker node. The worker node has got 16 CPU cores and 64 GB of memory, but YARN RM took 4 CPU cores and 16 GB memory and gave it to my container. Now my application's main() method will run in the container, and it can use 4 CPU cores and 16 GB memory.
 
 ## Inside the Container
 
