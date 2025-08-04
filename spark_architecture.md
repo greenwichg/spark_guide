@@ -46,7 +46,7 @@ So I have Python code in my main() method. This Python code is designed to start
 What is Py4J? Py4J allows a Python application to call a Java application. And that's how PySpark works. It will always start a JVM application and call Spark APIs in the JVM. The actual Spark application is always a Scala application running in the JVM, but PySpark is calling Java wrapper using Py4J, and the Java wrapper runs Scala code in the JVM. Make sense?
 
 ## Driver Components
-Great! What do we call these two things? The PySpark main method is my PySpark Driver, and the JVM application here is my Application Driver. These two terms are critical to remember. So your Spark application driver is the main method of your application. If you wrote a PySpark application, you would have a PySpark driver and an application driver. But if you wrote it in Scala, you won't have a PySpark driver, but you will always have an application driver. Make sense?
+Great! What do we call these two things? The PySpark main method is my PySpark Driver, and the JVM application here is my Application Driver. These two terms are critical to remember. So your Spark application driver is the main method of your application. If you wrote a PySpark application, you would have a PySpark driver and an application driver. But if you wrote it in Scala, you won't have a PySpark driver, but you will always have an application driver.
 
 ## Distributed Processing with Executors
 Great! In the lecture earlier, I told you that your Spark application is a distributed application in itself, right? So what did I mean? Let me explain.
