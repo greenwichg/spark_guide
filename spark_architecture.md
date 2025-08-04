@@ -4,8 +4,7 @@
 Apache Spark is a distributed computing platform. However, every Spark application is a distributed application in itself. I will explain that in a minute, but remember, every Spark application is a distributed application in itself.
 
 ## Understanding Distributed Applications and Clusters
-
-Great! A distributed application runs on a cluster, so you need a cluster for your Spark application. You can run it on your local machine for development and unit testing, but ultimately your Spark application runs on a production cluster.
+A distributed application runs on a cluster, so you need a cluster for your Spark application. You can run it on your local machine for development and unit testing, but ultimately your Spark application runs on a production cluster.
 
 ### Cluster Technologies
 
