@@ -140,3 +140,31 @@ You might wonder about the “data shuffling” from the Stage’s part. To dive
 - Transformations with narrow dependencies are those where each partition in the child RDD has a limited number of dependencies on partitions in the parent RDD. These partitions may depend on a single parent (e.g., the map operator) or a specific subset of parent partitions known beforehand (such as with coalesce).
 
 - Transformations with wide dependencies require data to be partitioned in a specific way, where a single partition of a parent RDD contributes to multiple partitions of the child RDD. This typically occurs with operations like groupByKey, reduceByKey, or join, which involve shuffling data. Consequently, wide dependencies result in stage boundaries in Spark's execution plan.
+
+---
+
+## A typical journey of the Spark application
+
+<img src="resources/twelve.jpg" alt="twelve" width="500">
+
+- The user defines the Spark Application. It must include the SparkSession object, serving as the central gateway for interacting with all Spark's functionalities.
+
+- The client submits a Spark application to the cluster manager. At this step, the client also requests the driver resource.
+
+- When the cluster manager accepts this submission, it places the driver process in one of the worker nodes.
+
+- The driver asks the cluster manager to launch the executors. The user can define the number of executors and related configurations.
+
+- If things go well, the cluster manager launches the executor processes and sends the information about their locations to the driver process.
+
+- The driver formulates an execution plan to guide the physical execution. This process starts with the logical plan, which outlines the intended transformations.
+
+- It generates the physical plan through several refinement steps, specifying the detailed execution strategy for processing the data.
+
+> We’ll explore the Spark planning process in the following section.
+
+- The driver starts scheduling tasks on executors, and each executor responds to the driver with the status of those tasks.
+
+- Once the application finishes, the driver exits with either success or failure. The cluster manager then shuts down the application’s executors.
+
+- The client can check the status of the Spark application by asking the cluster manager.
