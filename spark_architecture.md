@@ -1,6 +1,6 @@
 # If you're learning Apache Spark, this article is for you
 
-<img src="resources/one.png" alt="one" width="300">
+<img src="resources/one.png" alt="one" width="500">
 
 ## Intro
 At the time of this writing, Apache Spark has been released in its fourth major version, which includes many improvements and innovations.
