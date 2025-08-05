@@ -83,3 +83,37 @@ As mentioned, Spark keeps track of each RDD’s dependencies on other RDDs, the 
 Suppose any partition of an RDD is lost due to a node failure or other issues. Spark can reconstruct the lost data by reapplying the transformations to the original dataset described by the lineage.
 
 This approach eliminates the need to replicate data across nodes or write data to disk (like MapReduce).
+
+---
+
+Architecture
+A Spark application consists of:
+
+<img src="resources/six.jpg" alt="six" width="500">
+
+- Driver: This JVM process manages the entire Spark application, from handling user input to distributing tasks to the executors.
+
+- Cluster Manager: This component manages the cluster of machines running the Spark application. Spark can work with various cluster managers, including YARN, Apache Mesos, or its standalone manager.
+
+- Executors: These processes execute tasks the driver assigns and report their status and results. Each Spark application has its own set of executors.
+
+The Spark Driver-Executors cluster differs from the cluster hosting your Spark application. To run a Spark application, there must be a cluster of machines or processes (if you’re running Spark locally) that provides resources to Spark applications.
+
+The cluster manager manages this cluster and the machines that can host driver and executor processes, called workers.
+
+---
+
+## Mode
+Spark has different modes of execution, which are distinguished mainly by where the driver process is located.
+
+- Cluster Mode: The driver process is launched on a worker node alongside the executor processes in this mode. The cluster manager handles all the processes related to the Spark application.
+
+<img src="resources/seven.jpg" alt="seven" width="500">
+
+Client Mode: The driver remains on the client machine that submitted the application. This setup requires the client machine to maintain the driver process throughout the application’s execution.
+
+<img src="resources/eight.jpg" alt="eight" width="500">
+
+Local mode: This mode runs the entire Spark application on a single machine, achieving parallelism through multiple threads. It’s commonly used for learning Spark or testing applications in a simpler, local environment.
+
+<img src="resources/nine.jpg" alt="nine" width="500">
