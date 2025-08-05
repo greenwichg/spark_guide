@@ -120,3 +120,23 @@ Spark has different modes of execution, which are distinguished mainly by where 
 
 --- 
 
+## Anatomy
+It’s crucial to understand how Spark manages the workload:
+
+<img src="resources/ten.jpg" alt="ten" width="500">
+
+- Job: A job represents a series of transformations applied to data. It encompasses the entire workflow from start to finish.
+
+- Stage: A stage is a job segment executed without data shuffling. A job is split into different stages when a transformation requires shuffling data across partitions.
+
+- DAG: In Spark, RDD dependencies are used to build a Directed Acyclic Graph (DAG) of stages for a Spark job. The DAG ensures that stages are scheduled in topological order.
+
+- Task: A task is the smallest unit of execution within Spark. Each stage is divided into multiple tasks, which execute processing in parallel across different partitions.
+
+You might wonder about the “data shuffling” from the Stage’s part. To dive into shuffle, it’s helpful if we could understand the narrow and wide dependencies:
+
+<img src="resources/eleven.jpg" alt="eleven" width="500">
+
+- Transformations with narrow dependencies are those where each partition in the child RDD has a limited number of dependencies on partitions in the parent RDD. These partitions may depend on a single parent (e.g., the map operator) or a specific subset of parent partitions known beforehand (such as with coalesce).
+
+- Transformations with wide dependencies require data to be partitioned in a specific way, where a single partition of a parent RDD contributes to multiple partitions of the child RDD. This typically occurs with operations like groupByKey, reduceByKey, or join, which involve shuffling data. Consequently, wide dependencies result in stage boundaries in Spark's execution plan.
