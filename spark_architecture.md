@@ -89,7 +89,7 @@ This approach eliminates the need to replicate data across nodes or write data t
 Architecture
 A Spark application consists of:
 
-<img src="resources/six.jpg" alt="six" width="500">
+<img src="resources/six.png" alt="six" width="500">
 
 - Driver: This JVM process manages the entire Spark application, from handling user input to distributing tasks to the executors.
 
@@ -116,4 +116,4 @@ Client Mode: The driver remains on the client machine that submitted the applica
 
 Local mode: This mode runs the entire Spark application on a single machine, achieving parallelism through multiple threads. It’s commonly used for learning Spark or testing applications in a simpler, local environment.
 
-<img src="resources/nine.jpg" alt="nine" width="500">
+<img src="resources/nine.png" alt="nine" width="500">
