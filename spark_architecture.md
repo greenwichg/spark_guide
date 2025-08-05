@@ -110,10 +110,10 @@ Spark has different modes of execution, which are distinguished mainly by where 
 
 <img src="resources/seven.jpg" alt="seven" width="500">
 
-Client Mode: The driver remains on the client machine that submitted the application. This setup requires the client machine to maintain the driver process throughout the application’s execution.
+- Client Mode: The driver remains on the client machine that submitted the application. This setup requires the client machine to maintain the driver process throughout the application’s execution.
 
 <img src="resources/eight.jpg" alt="eight" width="500">
 
-Local mode: This mode runs the entire Spark application on a single machine, achieving parallelism through multiple threads. It’s commonly used for learning Spark or testing applications in a simpler, local environment.
+- Local mode: This mode runs the entire Spark application on a single machine, achieving parallelism through multiple threads. It’s commonly used for learning Spark or testing applications in a simpler, local environment.
 
 <img src="resources/nine.png" alt="nine" width="500">
