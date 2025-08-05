@@ -117,3 +117,6 @@ Spark has different modes of execution, which are distinguished mainly by where 
 - Local mode: This mode runs the entire Spark application on a single machine, achieving parallelism through multiple threads. It’s commonly used for learning Spark or testing applications in a simpler, local environment.
 
 <img src="resources/nine.png" alt="nine" width="500">
+
+--- 
+
