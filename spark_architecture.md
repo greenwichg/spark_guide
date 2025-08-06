@@ -256,10 +256,10 @@ There are two job schedule modes in Spark:
 
 <img src="resources/eighteen.png" alt="eighteen" width="500">
 
-Fair: Since Spark 0.8, the user can configure fair scheduling between jobs. With this mode, Spark assigns tasks between jobs in a round-robin fashion to ensure equal resource sharing. This implies that short jobs submitted while a long job is running can start receiving resources immediately without waiting for the long job to finish.
+- Fair: Since Spark 0.8, the user can configure fair scheduling between jobs. With this mode, Spark assigns tasks between jobs in a round-robin fashion to ensure equal resource sharing. This implies that short jobs submitted while a long job is running can start receiving resources immediately without waiting for the long job to finish.
 
 <img src="resources/nineteen.png" alt="nineteen" width="500">
 
-  - The fair scheduler supports grouping jobs into pools and setting various scheduling options for each pool, such as the weight. This can help isolate workload so critical jobs can be executed on a       larger resource pool. The user can configure which jobs can be run on which pools.
+- The fair scheduler supports grouping jobs into pools and setting various scheduling options for each pool, such as the weight. This can help isolate workload so critical jobs can be executed on a       larger resource pool. The user can configure which jobs can be run on which pools.
 
 <img src="resources/twenty.png" alt="twenty" width="500">
