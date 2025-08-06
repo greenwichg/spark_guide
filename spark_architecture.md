@@ -260,6 +260,6 @@ Fair: Since Spark 0.8, the user can configure fair scheduling between jobs. With
 
 <img src="resources/nineteen.png" alt="nineteen" width="500">
 
-  - The fair scheduler supports grouping jobs into pools and setting various scheduling options for each pool, such as the weight. This can help isolate workload so critical jobs can be executed on a larger resource pool. The user can configure which jobs can be run on which pools.
+  - The fair scheduler supports grouping jobs into pools and setting various scheduling options for each pool, such as the weight. This can help isolate workload so critical jobs can be executed on a       larger resource pool. The user can configure which jobs can be run on which pools.
 
 <img src="resources/twenty.png" alt="twenty" width="500">
