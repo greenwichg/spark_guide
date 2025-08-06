@@ -244,3 +244,22 @@ When the TaskScheduler requests resources, the SchedulerBackend informs the Task
 The TaskScheduler assigns tasks to these resources, resulting in a list of task descriptions. For each entry in this list, the SchedulerBackend serializes the task description and sends it to the executor.
 
 The executor deserializes the task description and begins launching the task.
+
+---
+
+## Scheduling Mode
+The above section shows how a job will be scheduled at the task level. What if the cluster has two or three jobs to run, which one will run first?
+
+There are two job schedule modes in Spark:
+
+- First In First Out (FIFO): By default, jobs are run in FIFO order. The first job gets all available resources, followed by the next jobs. Later jobs can start running immediately if the first job doesn’t consume the cluster’s resources. However, later jobs may remain pending if prior jobs use up all the resources.
+
+<img src="resources/eighteen.png" alt="eighteen" width="500">
+
+Fair: Since Spark 0.8, the user can configure fair scheduling between jobs. With this mode, Spark assigns tasks between jobs in a round-robin fashion to ensure equal resource sharing. This implies that short jobs submitted while a long job is running can start receiving resources immediately without waiting for the long job to finish.
+
+<img src="resources/nineteen.png" alt="nineteen" width="500">
+
+  - The fair scheduler supports grouping jobs into pools and setting various scheduling options for each pool, such as the weight. This can help isolate workload so critical jobs can be executed on a larger resource pool. The user can configure which jobs can be run on which pools.
+
+<img src="resources/twenty.png" alt="twenty" width="500">
