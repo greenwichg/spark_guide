@@ -168,3 +168,79 @@ You might wonder about the “data shuffling” from the Stage’s part. To dive
 - Once the application finishes, the driver exits with either success or failure. The cluster manager then shuts down the application’s executors.
 
 - The client can check the status of the Spark application by asking the cluster manager.
+
+---  
+
+## Plan
+> How does the driver know to execute the job?
+
+Spark has an optimizer called the Catalyst Optimizer.
+
+Spark's creator designed Catalyst based on functional programming constructs in Scala. Catalyst supports both rule-based and cost-based optimization.
+
+> Rule-Based Optimization (RBO): Rule-based optimization in databases relies on predefined rules and heuristics to choose the execution plan for a query.
+
+> Cost-Based Optimization (CBO): Cost-based optimization, on the other hand, uses statistical information about the data—such as table size, index selectivity, and data distribution—to estimate the cost of various execution plans. The optimizer evaluates multiple potential plans and chooses the lowest estimated cost.
+
+Before the actual data process on executors, the logic must go through an optimized process that contains four phases: analyzing the logical plan, optimizing the logical plan, physical planning, and code generation.
+
+<img src="resources/thirteen.jpg" alt="thirteen" width="500">
+
+- Analysis: The optimizer uses the rules and the catalog to answer questions like “Is the column/table name valid?” or “What is the column’s type?”.
+
+> The Catalog object enables interaction with metadata for databases, tables, and functions. It allows users to list, retrieve, and manage these entities and refresh table metadata to keep Spark's view in sync with underlying data sources.
+
+- Logical Optimization: Spark applies standard rule-based optimizations, such as predicate pushdown, projection pruning, null propagation, etc.
+
+- Physical Planning: Based on the logical plan, the optimizer generates one or more physical plans and selects the final one using a cost model.
+
+- Code Generation: The final query optimization phase generates Java bytecode for execution.
+
+The Catalyst optimizer uses the cost model framework to choose the optimal plan at the end of physical planning. The framework leverages different data statistics (e.g., row count, cardinality, max/min values, etc.) to choose the optimal plan.
+
+However, what happens when the statistics are outdated or unavailable?.
+
+Apache Spark 3, released in 2020, introduced Adaptive Query Execution (AQE) to tackle such problems. AQE allows query plans to be adjusted based on runtime statistics collected during execution.
+
+When finishing processing each stage, the executors materialize the stage’s intermediate results. The next stage can only begin once the previous stage is complete. This pause creates an opportunity for re-optimization, as data statistics from all partitions are available before the following operations start.
+
+<img src="resources/fourteen.jpg" alt="fourteen" width="500">
+
+This allows Sparks to employ optimization techniques such as combining smaller partitions into bigger ones to improve efficiency, splitting huge partitions into smaller ones to reduce stress on a single worker, or switching join strategies at run time (e.g., switching to broadcast join)
+
+---
+
+Scheduling Process
+So we have the plan, what’s next?
+
+Before physical execution on the executors, there is a scheduling process to assign tasks to the executors.
+
+This process involves some components:
+
+<img src="resources/fifteen.jpg" alt="fifteen" width="500">
+
+- The DAGScheduler for stage-oriented scheduling
+
+- The TaskScheduler for task-oriented scheduling
+
+- The SchedulerBackend interacts with the cluster manager and provides resources to the TaskScheduler.
+
+These components are created during the initialization of the driver process.
+
+The DAGScheduler is responsible for scheduling the stages according to the DAG's topological order. Each stage is submitted once all its upstream dependencies are completed.
+
+The DAGScheduler creates a TaskSet for each stage, which includes fully independent and unprocessed tasks of a stage. Then, the DAGScheduler sends the TaskSet to the TaskScheduler. The DAGScheduler also determines the preferred locations for each task based on the current cache status and sends these to the TaskScheduler.
+
+The TaskScheduler is responsible for scheduling tasks from the TaskSet on available executors. It requests resources from the SchedulerBackend to schedule tasks.
+
+<img src="resources/sixteen.jpg" alt="sixteen" width="500">
+
+The SchedulerBackend requests executors from the cluster manager, which then launches executors based on the application's requirements. Once started, the executors attempt to register with the SchedulerBackend through an RPC endpoint. If successful, the SchedulerBackend receives a list of the application's desired executors.
+
+<img src="resources/seventeen.jpg" alt="seventeen" width="500">
+
+When the TaskScheduler requests resources, the SchedulerBackend informs the TaskScheduler about the available resources on the executors.
+
+The TaskScheduler assigns tasks to these resources, resulting in a list of task descriptions. For each entry in this list, the SchedulerBackend serializes the task description and sends it to the executor.
+
+The executor deserializes the task description and begins launching the task.
