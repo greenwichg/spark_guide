@@ -87,3 +87,47 @@
 - **Lineage and Fault Tolerance: Each transformation creates a new RDD, preserving the lineage and allowing Spark to recompute lost data reliably. Mutable RDDs would make this much harder.**
 
 - **Functional Programming: RDDs follow functional programming principles that emphasize immutability, making it easier to handle failures and maintain data integrity.**
+
+## The journey of the Spark application
+**Before diving into the flow of a Spark application, it’s essential to understand the different execution modes Spark offers. We have three options:**
+
+- **Cluster Mode: In this mode, the driver process is launched on a worker node within the cluster alongside the executor processes. The cluster manager handles all the processes related to the Spark application.**
+
+<img src="resources/overview/snap_seven.png" alt="Snap seven" width="600">
+
+- **Client Mode: The driver remains on the client machine that submitted the application. This setup requires the client machine to maintain the driver process throughout the application’s execution.**
+
+<img src="resources/overview/snap_eight.png" alt="Snap eight" width="600">
+
+- **Local mode: This mode runs the entire Spark application on a single machine, achieving parallelism through multiple threads. It’s commonly used for learning Spark or testing applications in a simpler, local environment.**
+
+**Now, we will learn the Spark application flow with the cluster mode. Suppose the application leverages DataFrame API to process data. Here are the steps from the beginning to the end:**
+
+<img src="resources/overview/spark_nine.png" alt="Snap eight" width="600">
+
+- **First, the user defines the Spark Application using their chosen programming language. Every application must include the SparkSession object. This object is the entry point to programming with Apache Spark, which serves as the central gateway for interacting with all of Spark's functionalities.**
+
+- **Then, the client submits a Spark application, which is a pre-compiled JAR, to the cluster manager. At this step, the client also requests for the driver resource.**
+
+- **When the cluster manager accepts this submission, it places the driver process in one of the worker nodes.**
+
+- **Next, the SparkSession from the application code asks the cluster manager to launch the executors. The user can define the number of executors and related configurations.**
+
+- **If things go well, the cluster manager launches the executor processes and sends the relevant information about their locations to the driver process.**
+
+- **Before execution begins, it formulates an execution plan to guide the physical execution. This process starts with the logical plan, which outlines the intended transformations. It generates the physical plan through several refinement steps, specifying the detailed execution strategy for processing the data.**
+
+> **Note: I’ll explore the Spark planning process in detail in an upcoming article.**
+
+- **The driver starts scheduling tasks on executors, and each executor responds to the driver with the status of those tasks.**
+
+- **After a Spark Application is completed, the driver exits with either success or failure. The cluster manager then shuts down the executors for this application.**
+
+- **Then, the client can check the status of the Spark application by asking the cluster manager.**
+
+## Outro
+**Thank you for reading this far!**
+
+**In this article, we've covered the basics of Apache Spark. I'm excited to dive deeper into this processing engine and will share more insights in future articles.**
+
+**Stay tuned, and I look forward to seeing you in the next post!**
