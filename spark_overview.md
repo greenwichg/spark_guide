@@ -1,6 +1,6 @@
 # The Overview Of Apache Spark
 
-<img src="resources/overview/snap_one.png" alt="Snap one" width="700">
+<img src="resources/overview/snap_one.png" alt="Snap one" width="600">
 
 ## Intro
 **This week, we’ll explore Apache Spark. Given the vast scope of this processing engine, starting with an overview seems like the best approach to streamlining my learning process.**
@@ -10,7 +10,7 @@
 ## Background
 **At its core, Apache Spark is an open-source distributed computing system designed to quickly process large volumes of data that can hardly accomplished by operating on a single machine. Spark distributes data and computations across multiple machines, allowing for parallel processing.**
 
-<img src="resources/overview/snap_two.jpg" alt="Snap one" width="700">
+<img src="resources/overview/snap_two.jpg" alt="Snap one" width="600">
 
 **It was first developed at UC Berkeley’s AMPLab in 2009. At that time, Hadoop MapReduce was the leading parallel programming engine for processing massive datasets across multiple machines. AMPLab collaborated with early MapReduce users to identify its strengths and limitations, driving the creation of more versatile computing platforms. They also worked closely with Hadoop users at UC Berkeley, who focused on large-scale machine learning requiring iterative algorithms and multiple data passes.**
 
@@ -21,7 +21,7 @@
 ## The Spark Application Architecture
 **A typical Spark application consists of several key components:**
 
-<img src="resources/overview/snap_three.png" alt="Snap one" width="700">
+<img src="resources/overview/snap_three.png" alt="Snap one" width="600">
 
 - **Driver: This JVM process manages the Spark application, handling user input and distributing work to the executors.**
 
@@ -31,7 +31,7 @@
 
 > **Note: You might find some confusion here. The cluster manager will have its own “driver” (sometimes called master) and “worker” abstractions. The main difference is that these are tied to physical machines rather than Spark processes.**
 
-<img src="resources/overview/snap_four.png" alt="Snap four" width="700">
+<img src="resources/overview/snap_four.png" alt="Snap four" width="600">
 
 ## Job, Stage, and Task
 **Job: In Spark, a job represents a series of transformations applied to data. It encompasses the entire workflow from start to finish.**
@@ -48,7 +48,7 @@
 ### Properties
 **Internally, each RDD in Spark has five key properties:**
 
-<img src="resources/overview/snap_five.png" alt="Snap five" width="700">
+<img src="resources/overview/snap_five.png" alt="Snap five" width="600">
 
 - **List of Partitions: The RDD is divided into partitions, which are the units of parallelism in Spark.**
 
@@ -63,7 +63,7 @@
 ### Lazy Evaluation
 **When you define the RDD, its inside data is not available or transformed immediately until an action triggers the execution. This approach allows Spark to determine the most efficient way to execute the transformations.**
 
-<img src="resources/overview/snap_six.png" alt="Snap six" width="700">
+<img src="resources/overview/snap_six.png" alt="Snap six" width="600">
 
 - **Transformations, such as map or filter, are operations that define how the data should be transformed, but they don't execute until an action forces the computation. Spark doesn't modify the original RDD when a transformation is applied to an RDD. Instead, it creates a new RDD that represents the result of applying the transformation because RDD is immutable.**
 
