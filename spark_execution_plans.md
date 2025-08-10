@@ -56,3 +56,26 @@
 - **Code Generation: The final query optimization phase involves generating Java bytecode for execution. Spark SQL uses code generation to speed up processing, especially for CPU-bound in-memory datasets. Catalyst simplifies this by leveraging Scala’s quasiquotes, which allow programmatic construction of abstract syntax trees (ASTs) compiled into bytecode at runtime. Catalyst transforms SQL expressions into Scala ASTs, which are compiled and executed.**
 
 **After understanding the SparkSQL original optimizer, we will move to the next section, which describes Spark's new optimization framework.**
+
+## Spark 3 - Adaptive Query Execution
+**As mentioned in the above section, the Catalyst optimizer uses the cost model framework to choose the optimal plan at the end of physical planning. The framework collects and uses different data statistics (e.g., row count, number of distinct values, NULL values, max/min values, etc.) to help Spark choose the optimal plan.**
+
+**However, what happens when the statistics are outdated or unavailable? This can lead to suboptimal query plans. In Apache Spark 3, released in 2020, Adaptive Query Execution (AQE) was introduced to tackle such problems with the ability to adjust query plans based on runtime statistics collected during the execution.**
+
+**Spark operators are typically pipelined and executed in parallel processes. A shuffle or broadcast exchange breaks the pipeline into query stages, where each stage materializes intermediate results. The next stage can only begin once the previous stage is complete. This pause creates an opportunity for re-optimization, as data statistics from all partitions are available before the following operations start.**
+
+<img src="resources/execution_plan/snap_six.png" alt="Snap six" width="600">
+
+**Let's overview the flow of the AQE framework:**
+
+- **The Adaptive Query Execution (AQE) framework starts by executing leaf stages, which do not depend on other stages. (reading data input)**
+
+- **Once one or more of these stages complete materialization, the framework marks them as complete in the physical query plan. It updates the logical query plan with runtime statistics from the completed stages.**
+
+- **The framework uses these new statistics to run the optimizer, applying a selected list of logical optimization rules, the physical planner, and physical optimization rules, including adaptive-execution-specific rules like coalescing partitions and skew join handling.**
+
+- **The AQE framework identifies and executes new query stages with the newly optimized plan.**
+
+- **The execute-reoptimize-execute process repeats until the entire query is completed.**
+
+**Next, we will explore the three features of the AQE framework: dynamically coalescing shuffle partitions, dynamically switching join strategies, and dynamically optimizing skew joins.**
