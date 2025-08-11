@@ -79,3 +79,28 @@
 - **The execute-reoptimize-execute process repeats until the entire query is completed.**
 
 **Next, we will explore the three features of the AQE framework: dynamically coalescing shuffle partitions, dynamically switching join strategies, and dynamically optimizing skew joins.**
+
+## Dynamically coalescing shuffle partitions.
+**Shuffle operations can significantly impact performance when running queries on large datasets in Spark. Shuffle is expensive because it requires moving data around to redistribute it for downstream operators. Thus, the number of partitions directly affects the shuffle performance. However, determining the optimal number in the first place is challenging:**
+
+- **Too few partitions can result in large partitions that may cause tasks to spill data to disk.**
+
+- **Too many partitions lead to small partitions, causing inefficient I/O with numerous small network data fetches.**
+
+**To address this, the user can start with a relatively large number of shuffle partitions and then combine smaller adjacent partitions at runtime by analyzing shuffle file statistics with the help of AQE. This approach helps balance partition sizes and improve query performance. Let's visit the example below for a better understanding:**
+
+<img src="resources/execution_plan/snap_seven.png" alt="Snap seven" width="600">
+
+## Dynamically switching join strategies.
+**Spark offers several join strategies, with broadcast hash join typically the most efficient when one side of the join comfortably fits in memory. Spark initially plans a broadcast hash join if it estimates that the join relation's size is below a specified threshold at the planning phase. However, this estimate can be off due to factors like highly selective filters or complex joint operations.**
+
+**To address this, Adaptive Query Execution (AQE) now replans the join strategy at runtime based on the actual size of the join relation collected during the execution.**
+
+<img src="resources/execution_plan/snap_eight.png" alt="Snap eight" width="600">
+
+## Dynamically optimizing skew joins.
+**Data skew happens when data is not distributed evenly across partitions in a cluster, which can impact query performance, especially during joins. The AQE skew joins optimization addresses this by automatically detecting skew from shuffle file statistics. It then splits the skewed partitions into smaller partitions.**
+
+**If we don’t employ AQE, our application will have a straggler executor (the one that lags significantly behind the others), which increases the system's overall latency. With the optimization in place, the data from the straggler is split into smaller partitions and is in charge of more executors, which helps improve the overall performance.**
+
+<img src="resources/execution_plan/snap_nine.png" alt="Snap nine" width="600">
