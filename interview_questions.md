@@ -202,6 +202,26 @@ GROUP BY product;
 
 ### Objective: Expand rows based on quantity
 
+**Input Data:**
+```
+order   prd    quantity
+ord1    prd1   3
+ord2    prd2   2
+ord3    prd3   1
+```
+
+**Expected Output:**
+```
+order   prd    quantity
+ord1    prd1   1 
+ord1    prd1   1
+ord1    prd1   1
+ord2    prd2   1
+ord2    prd2   1
+ord3    prd3   1
+```
+
+### PySpark Approach:
 ```python
 from pyspark.sql.functions import expr
 
@@ -212,7 +232,79 @@ exploded_df = df.select(
 )
 ```
 
-**Record Count Calculation**: Sum of all quantity values in original data
+### SQL Approaches:
+
+#### Method 1: Recursive CTE (PostgreSQL, SQL Server, etc.)
+```sql
+WITH RECURSIVE exploded AS (
+    -- Base case: start with quantity = 1 for each row
+    SELECT order_col, prd, 1 as quantity, quantity as original_qty
+    FROM orders
+    
+    UNION ALL
+    
+    -- Recursive case: add rows until we reach original quantity
+    SELECT order_col, prd, quantity + 1, original_qty
+    FROM exploded
+    WHERE quantity < original_qty
+)
+SELECT order_col, prd, 1 as quantity
+FROM exploded
+ORDER BY order_col, prd;
+```
+
+#### Method 2: Using Numbers Table/Sequence (Most SQL Databases)
+```sql
+-- Create a numbers table or use existing sequence
+WITH numbers AS (
+    SELECT 1 as n UNION ALL SELECT 2 UNION ALL SELECT 3 
+    UNION ALL SELECT 4 UNION ALL SELECT 5  -- extend as needed
+),
+exploded AS (
+    SELECT o.order_col, o.prd, 1 as quantity
+    FROM orders o
+    JOIN numbers n ON n.n <= o.quantity
+)
+SELECT order_col, prd, quantity
+FROM exploded
+ORDER BY order_col, prd;
+```
+
+#### Method 3: Using GENERATE_SERIES (PostgreSQL)
+```sql
+SELECT 
+    o.order_col,
+    o.prd,
+    1 as quantity
+FROM orders o
+CROSS JOIN generate_series(1, o.quantity);
+```
+
+#### Method 4: Using UNNEST with Array (BigQuery/PostgreSQL)
+```sql
+SELECT 
+    order_col,
+    prd,
+    1 as quantity
+FROM orders,
+UNNEST(GENERATE_ARRAY(1, quantity)) as pos;
+```
+
+#### Method 5: Self-Join Approach (MySQL/Traditional SQL)
+```sql
+-- For small quantities, use multiple self-joins
+SELECT o1.order_col, o1.prd, 1 as quantity FROM orders o1 WHERE o1.quantity >= 1
+UNION ALL
+SELECT o2.order_col, o2.prd, 1 as quantity FROM orders o2 WHERE o2.quantity >= 2
+UNION ALL  
+SELECT o3.order_col, o3.prd, 1 as quantity FROM orders o3 WHERE o3.quantity >= 3;
+-- Continue for expected max quantity
+```
+
+**Record Count Calculation**: 
+- Sum of all quantity values in original data
+- Input: 3 + 2 + 1 = 6 total records expected
+- Each original row becomes N rows where N = its quantity value
 
 ---
 
