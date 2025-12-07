@@ -2,7 +2,7 @@ import json
 import boto3
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 s3 = boto3.client('s3')
 sns = boto3.client('sns')
@@ -17,15 +17,29 @@ def lambda_handler(event, context):
     sns_topic_arn = os.environ['SNS_TOPIC_ARN']
     step_function_arn = os.environ['STEP_FUNCTION_ARN']
     
-    # Wait 90 seconds FIRST to let all files upload
+    # Wait 90 seconds
     time.sleep(90)
     
-    # Generate execution name based on 10-minute window
+    # Check if any file was uploaded in last 10 minutes
+    ten_min_ago = datetime.now(timezone.utc) - timedelta(minutes=10)
+    recent_files = False
+    
+    response = s3.list_objects_v2(Bucket=source_bucket, Prefix=source_prefix)
+    for obj in response.get('Contents', []):
+        if obj['LastModified'].replace(tzinfo=timezone.utc) > ten_min_ago:
+            recent_files = True
+            break
+    
+    if not recent_files:
+        print("No recent files uploaded, skipping...")
+        return {'message': 'No recent files, skipping'}
+    
+    # Generate execution name
     now = datetime.now(timezone.utc)
-    minute_window = (now.minute // 10) * 10  # 0, 10, 20, 30, 40, 50
+    minute_window = (now.minute // 10) * 10
     execution_name = f"exec-{now.strftime('%Y-%m-%d-%H')}-{minute_window:02d}"
     
-    # Read config and get files
+    # Read config
     config_data = s3.get_object(Bucket=config_bucket, Key=config_key)
     content = config_data['Body'].read().decode('utf-8')
     
@@ -40,6 +54,7 @@ def lambda_handler(event, context):
             config_jobs.append(obj)
             content = content[idx:].strip()
     
+    # Get S3 files
     s3_files = set()
     response = s3.list_objects_v2(Bucket=source_bucket, Prefix=source_prefix)
     for obj in response.get('Contents', []):
