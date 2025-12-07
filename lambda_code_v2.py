@@ -2,7 +2,7 @@ import json
 import boto3
 import os
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 s3 = boto3.client('s3')
 sns = boto3.client('sns')
@@ -17,17 +17,15 @@ def lambda_handler(event, context):
     sns_topic_arn = os.environ['SNS_TOPIC_ARN']
     step_function_arn = os.environ['STEP_FUNCTION_ARN']
     
-    # Generate execution name based on current hour (only 1 per hour allowed)
+    # Wait 90 seconds FIRST to let all files upload
+    time.sleep(90)
+    
+    # Generate execution name based on 10-minute window
     now = datetime.now(timezone.utc)
-    execution_name = f"exec-{now.strftime('%Y-%m-%d-%H')}"
+    minute_window = (now.minute // 10) * 10  # 0, 10, 20, 30, 40, 50
+    execution_name = f"exec-{now.strftime('%Y-%m-%d-%H')}-{minute_window:02d}"
     
-    # Wait 60 seconds to let all files upload
-    time.sleep(60)
-    
-    # Try to start Step Function with unique name
-    # If another Lambda already started it, this will fail
-    
-    # First, read config and get files
+    # Read config and get files
     config_data = s3.get_object(Bucket=config_bucket, Key=config_key)
     content = config_data['Body'].read().decode('utf-8')
     
@@ -81,17 +79,16 @@ def lambda_handler(event, context):
         try:
             sfn.start_execution(
                 stateMachineArn=step_function_arn,
-                name=execution_name,  # Unique name per hour
+                name=execution_name,
                 input=json.dumps({'glue_jobs': glue_params})
             )
             return {
                 'message': 'Step Function triggered',
                 'execution_name': execution_name,
-                'active_jobs': len(glue_params),
-                'skipped_jobs': skipped_jobs
+                'active_jobs': len(glue_params)
             }
         except sfn.exceptions.ExecutionAlreadyExists:
             print(f"Execution {execution_name} already exists, skipping...")
             return {'message': 'Execution already exists, skipping'}
     
-    return {'message': 'No action needed', 'skipped_jobs': skipped_jobs}
+    return {'message': 'No action needed'}
