@@ -17,61 +17,17 @@ def lambda_handler(event, context):
     sns_topic_arn = os.environ['SNS_TOPIC_ARN']
     step_function_arn = os.environ['STEP_FUNCTION_ARN']
     
-    # CHECK 1: Skip if Step Function ran in last 30 minutes
-    try:
-        thirty_min_ago = datetime.now(timezone.utc) - timedelta(minutes=30)
-        executions = sfn.list_executions(
-            stateMachineArn=step_function_arn,
-            maxResults=5
-        )
-        
-        for exe in executions.get('executions', []):
-            start_time = exe['startDate']
-            if start_time.tzinfo is None:
-                start_time = start_time.replace(tzinfo=timezone.utc)
-            
-            if start_time > thirty_min_ago:
-                print(f"Recent execution: {exe['status']}, skipping...")
-                return {'message': 'Recent execution exists, skipping'}
-    except Exception as e:
-        print(f"Check error: {e}")
+    # Generate execution name based on current hour (only 1 per hour allowed)
+    now = datetime.now(timezone.utc)
+    execution_name = f"exec-{now.strftime('%Y-%m-%d-%H')}"
     
-    # CHECK 2: Skip if Step Function currently running
-    try:
-        running = sfn.list_executions(
-            stateMachineArn=step_function_arn,
-            statusFilter='RUNNING',
-            maxResults=1
-        )
-        if running['executions']:
-            print("Step Function running, skipping...")
-            return {'message': 'Step Function running, skipping'}
-    except Exception as e:
-        print(f"Running check error: {e}")
-    
-    # Small delay to let other files land (60 seconds)
+    # Wait 60 seconds to let all files upload
     time.sleep(60)
     
-    # CHECK 3: Re-verify no Step Function started during wait
-    try:
-        one_min_ago = datetime.now(timezone.utc) - timedelta(minutes=1)
-        executions = sfn.list_executions(
-            stateMachineArn=step_function_arn,
-            maxResults=3
-        )
-        
-        for exe in executions.get('executions', []):
-            start_time = exe['startDate']
-            if start_time.tzinfo is None:
-                start_time = start_time.replace(tzinfo=timezone.utc)
-            
-            if start_time > one_min_ago:
-                print("Step Function started by another Lambda, skipping...")
-                return {'message': 'Step Function just started, skipping'}
-    except Exception as e:
-        print(f"Recheck error: {e}")
+    # Try to start Step Function with unique name
+    # If another Lambda already started it, this will fail
     
-    # Process files
+    # First, read config and get files
     config_data = s3.get_object(Bucket=config_bucket, Key=config_key)
     content = config_data['Body'].read().decode('utf-8')
     
@@ -122,14 +78,20 @@ def lambda_handler(event, context):
                 skipped_jobs.append(job.get('job_name', ''))
     
     if glue_params:
-        sfn.start_execution(
-            stateMachineArn=step_function_arn,
-            input=json.dumps({'glue_jobs': glue_params})
-        )
-        return {
-            'message': 'Step Function triggered',
-            'active_jobs': len(glue_params),
-            'skipped_jobs': skipped_jobs
-        }
+        try:
+            sfn.start_execution(
+                stateMachineArn=step_function_arn,
+                name=execution_name,  # Unique name per hour
+                input=json.dumps({'glue_jobs': glue_params})
+            )
+            return {
+                'message': 'Step Function triggered',
+                'execution_name': execution_name,
+                'active_jobs': len(glue_params),
+                'skipped_jobs': skipped_jobs
+            }
+        except sfn.exceptions.ExecutionAlreadyExists:
+            print(f"Execution {execution_name} already exists, skipping...")
+            return {'message': 'Execution already exists, skipping'}
     
     return {'message': 'No action needed', 'skipped_jobs': skipped_jobs}
