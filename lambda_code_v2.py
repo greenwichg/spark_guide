@@ -20,13 +20,13 @@ def lambda_handler(event, context):
     # Wait 90 seconds
     time.sleep(90)
     
-    # Check if any file was uploaded in last 10 minutes
-    ten_min_ago = datetime.now(timezone.utc) - timedelta(minutes=10)
+    # Check if any file was uploaded in last 30 minutes
+    thirty_min_ago = datetime.now(timezone.utc) - timedelta(minutes=30)
     recent_files = False
     
     response = s3.list_objects_v2(Bucket=source_bucket, Prefix=source_prefix)
     for obj in response.get('Contents', []):
-        if obj['LastModified'].replace(tzinfo=timezone.utc) > ten_min_ago:
+        if obj['LastModified'].replace(tzinfo=timezone.utc) > thirty_min_ago:
             recent_files = True
             break
     
@@ -34,9 +34,9 @@ def lambda_handler(event, context):
         print("No recent files uploaded, skipping...")
         return {'message': 'No recent files, skipping'}
     
-    # Generate execution name
+    # Generate execution name - 30 minute window
     now = datetime.now(timezone.utc)
-    minute_window = (now.minute // 10) * 10
+    minute_window = (now.minute // 30) * 30  # 0 or 30
     execution_name = f"exec-{now.strftime('%Y-%m-%d-%H')}-{minute_window:02d}"
     
     # Read config
