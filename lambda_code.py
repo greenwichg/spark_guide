@@ -1,7 +1,8 @@
 import json
 import boto3
 import os
-from datetime import datetime, timezone, timedelta
+import time
+from datetime import datetime, timezone
 
 s3 = boto3.client('s3')
 sns = boto3.client('sns')
@@ -16,35 +17,25 @@ def lambda_handler(event, context):
     sns_topic_arn = os.environ['SNS_TOPIC_ARN']
     step_function_arn = os.environ['STEP_FUNCTION_ARN']
     
-    # CHECK 1: Any Step Function started in last 5 minutes?
-    try:
-        five_min_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
-        executions = sfn.list_executions(
-            stateMachineArn=step_function_arn,
-            maxResults=5
-        )
-        
-        for exe in executions.get('executions', []):
-            if exe['startDate'].replace(tzinfo=timezone.utc) > five_min_ago:
-                print(f"Recent execution found: {exe['status']} at {exe['startDate']}")
-                return {'message': 'Recent Step Function execution exists, skipping'}
-    except Exception as e:
-        print(f"Execution check error: {e}")
+    # Wait 90 seconds to let all files upload
+    time.sleep(90)
     
-    # CHECK 2: Step Function currently running?
-    try:
-        running = sfn.list_executions(
-            stateMachineArn=step_function_arn,
-            statusFilter='RUNNING',
-            maxResults=1
-        )
-        if running['executions']:
-            print("Step Function running, skipping...")
-            return {'message': 'Step Function running, skipping'}
-    except Exception as e:
-        print(f"Running check error: {e}")
+    # Generate execution name - 1 hour window (safe)
+    now = datetime.now(timezone.utc)
+    execution_name = f"exec-{now.strftime('%Y-%m-%d-%H')}"
     
-    # Proceed with processing
+    # Check if execution already exists (running, succeeded, or failed)
+    try:
+        exec_arn = f"{step_function_arn.replace(':stateMachine:', ':execution:')}:{execution_name}"
+        sfn.describe_execution(executionArn=exec_arn)
+        print(f"Execution {execution_name} already exists, skipping...")
+        return {'message': 'Execution already exists, skipping'}
+    except sfn.exceptions.ExecutionDoesNotExist:
+        pass  # Good, continue
+    except Exception as e:
+        print(f"Describe error: {e}")
+    
+    # Read config
     config_data = s3.get_object(Bucket=config_bucket, Key=config_key)
     content = config_data['Body'].read().decode('utf-8')
     
@@ -59,13 +50,18 @@ def lambda_handler(event, context):
             config_jobs.append(obj)
             content = content[idx:].strip()
     
-    # Get S3 CSV files
+    # Get S3 files
     s3_files = set()
     response = s3.list_objects_v2(Bucket=source_bucket, Prefix=source_prefix)
     for obj in response.get('Contents', []):
         file_name = obj['Key'].split('/')[-1]
         if file_name and file_name.endswith('.csv'):
             s3_files.add(file_name)
+    
+    # No files = exit
+    if not s3_files:
+        print("No CSV files found, exiting...")
+        return {'message': 'No files found'}
     
     config_files = {job['source_file_path'].split('/')[-1] for job in config_jobs}
     new_files = s3_files - config_files
@@ -96,14 +92,19 @@ def lambda_handler(event, context):
                 skipped_jobs.append(job.get('job_name', ''))
     
     if glue_params:
-        sfn.start_execution(
-            stateMachineArn=step_function_arn,
-            input=json.dumps({'glue_jobs': glue_params})
-        )
-        return {
-            'message': 'Step Function triggered',
-            'active_jobs': len(glue_params),
-            'skipped_jobs': skipped_jobs
-        }
+        try:
+            sfn.start_execution(
+                stateMachineArn=step_function_arn,
+                name=execution_name,
+                input=json.dumps({'glue_jobs': glue_params})
+            )
+            return {
+                'message': 'Step Function triggered',
+                'execution_name': execution_name,
+                'active_jobs': len(glue_params)
+            }
+        except sfn.exceptions.ExecutionAlreadyExists:
+            print(f"Execution {execution_name} already exists, skipping...")
+            return {'message': 'Execution already exists, skipping'}
     
-    return {'message': 'No action needed', 'skipped_jobs': skipped_jobs}
+    return {'message': 'No matching files'}
