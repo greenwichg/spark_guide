@@ -20,18 +20,18 @@ def lambda_handler(event, context):
     # Wait 90 seconds to let all files upload
     time.sleep(90)
     
-    # Generate execution name - 1 hour window (safe)
+    # TESTING: Unique execution name (change to 1-hour for production)
     now = datetime.now(timezone.utc)
-    execution_name = f"exec-{now.strftime('%Y-%m-%d-%H')}"
+    execution_name = f"test-{now.strftime('%Y-%m-%d-%H-%M')}"
     
-    # Check if execution already exists (running, succeeded, or failed)
+    # Check if execution already exists
     try:
         exec_arn = f"{step_function_arn.replace(':stateMachine:', ':execution:')}:{execution_name}"
         sfn.describe_execution(executionArn=exec_arn)
         print(f"Execution {execution_name} already exists, skipping...")
         return {'message': 'Execution already exists, skipping'}
     except sfn.exceptions.ExecutionDoesNotExist:
-        pass  # Good, continue
+        pass
     except Exception as e:
         print(f"Describe error: {e}")
     
@@ -58,7 +58,6 @@ def lambda_handler(event, context):
         if file_name and file_name.endswith('.csv'):
             s3_files.add(file_name)
     
-    # No files = exit
     if not s3_files:
         print("No CSV files found, exiting...")
         return {'message': 'No files found'}
