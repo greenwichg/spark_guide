@@ -3,9 +3,11 @@ import boto3
 import os
 import time
 from datetime import datetime, timezone
+
 s3 = boto3.client('s3')
 sns = boto3.client('sns')
 sfn = boto3.client('stepfunctions')
+
 def lambda_handler(event, context):
     config_bucket = os.environ['CONFIG_BUCKET']
     config_key = os.environ['CONFIG_KEY']
@@ -89,18 +91,18 @@ def lambda_handler(event, context):
             else:
                 skipped_jobs.append(job.get('job_name', ''))
   
-    # Trigger Step Function if there are active jobs OR new files (to handle notification)
-    if glue_params or new_files:
+    # Determine if action is needed
+    action_needed = bool(new_files) or bool(glue_params)
+  
+    if action_needed:
         try:
+            input_payload = {'glue_jobs': glue_params}
             sfn.start_execution(
                 stateMachineArn=step_function_arn,
                 name=execution_name,
-                input=json.dumps({
-                    'glue_jobs': glue_params,
-                    'new_files': list(new_files) if new_files else None
-                })
+                input=json.dumps(input_payload)
             )
-            # Send SNS only after successful start (only one invocation reaches here)
+            # Lock acquired successfully
             if new_files:
                 sns.publish(
                     TopicArn=sns_topic_arn,
