@@ -1,50 +1,36 @@
 import json
 import boto3
 import os
-import time
-from datetime import datetime, timezone, timedelta
 
 s3 = boto3.client('s3')
 sns = boto3.client('sns')
-sfn = boto3.client('stepfunctions')
 
 def lambda_handler(event, context):
     config_bucket = os.environ['CONFIG_BUCKET']
     config_key = os.environ['CONFIG_KEY']
-    source_bucket = os.environ['SOURCE_BUCKET']
-    source_prefix = os.environ['SOURCE_PREFIX']
     sns_topic_arn = os.environ['SNS_TOPIC_ARN']
-    step_function_arn = os.environ['STEP_FUNCTION_ARN']
   
-    # Fixed test name - ONLY ONE can run
-    execution_name = "test-run-001"
+    # Extract bucket and key from S3 event
+    if 'Records' in event and len(event['Records']) > 0:
+        s3_record = event['Records'][0].get('s3', {})
+        bucket = s3_record.get('bucket', {}).get('name')
+        key = s3_record.get('object', {}).get('key')
+        if not bucket or not key:
+            print("Invalid S3 event structure; skipping.")
+            return {'message': 'Invalid event'}
+        
+        # Extract file name from key
+        file_name = key.split('/')[-1]
+        if not file_name.endswith('.csv'):
+            print(f"File {file_name} is not a CSV; skipping.")
+            return {'message': 'Non-CSV file'}
+        
+        print(f"Processing file: {file_name}")
+    else:
+        print("No valid S3 records in event; skipping.")
+        return {'message': 'No S3 records'}
   
-    # Check if execution already exists
-    try:
-        exec_arn = f"{step_function_arn.replace(':stateMachine:', ':execution:')}:{execution_name}"
-        sfn.describe_execution(executionArn=exec_arn)
-        print(f"Execution {execution_name} already exists, skipping...")
-        return {'message': 'Execution already exists, skipping'}
-    except sfn.exceptions.ExecutionDoesNotExist:
-        pass
-    except Exception as e:
-        print(f"Describe error: {e}")
-  
-    # Wait 90 seconds to batch concurrent triggers
-    time.sleep(90)
-  
-    # Double-check after waiting
-    try:
-        exec_arn = f"{step_function_arn.replace(':stateMachine:', ':execution:')}:{execution_name}"
-        sfn.describe_execution(executionArn=exec_arn)
-        print(f"Execution {execution_name} started by another Lambda, skipping...")
-        return {'message': 'Execution already exists, skipping'}
-    except sfn.exceptions.ExecutionDoesNotExist:
-        pass
-    except Exception as e:
-        print(f"Describe error: {e}")
-  
-    # Read config
+    # Read config.json
     config_data = s3.get_object(Bucket=config_bucket, Key=config_key)
     content = config_data['Body'].read().decode('utf-8')
   
@@ -59,118 +45,22 @@ def lambda_handler(event, context):
             config_jobs.append(obj)
             content = content[idx:].strip()
   
-    # Get S3 files
-    s3_files = set()
-    response = s3.list_objects_v2(Bucket=source_bucket, Prefix=source_prefix)
-    for obj in response.get('Contents', []):
-        file_name = obj['Key'].split('/')[-1]
-        if file_name and file_name.endswith('.csv'):
-            s3_files.add(file_name)
-  
-    if not s3_files:
-        print("No CSV files found, exiting...")
-        return {'message': 'No files found'}
-  
+    # Get config files
     config_files = {job['source_file_path'].split('/')[-1] for job in config_jobs}
-    new_files = s3_files - config_files
   
-    print(f"Detected new_files: {list(new_files)}")  # Debug
-  
-    # Marker creation with dedup
-    tracking_prefix = 'tracked/'
-    claimed_new_files = []  # For debug; not used for SNS
-  
-    for new_file in new_files:
-        marker_key = f"{tracking_prefix}{new_file}"
+    # Check if file_name is not in config
+    if file_name not in config_files:
         try:
-            s3.head_object(Bucket=config_bucket, Key=marker_key)
-            print(f"Marker for {new_file} already exists, skipping")
-        except s3.exceptions.ClientError as e:
-            if e.response['Error']['Code'] == '404':
-                try:
-                    s3.put_object(
-                        Bucket=config_bucket,
-                        Key=marker_key,
-                        Body='',
-                        IfNoneMatch='*'
-                    )
-                    claimed_new_files.append(new_file)
-                    print(f"Created marker for: {new_file}")
-                except s3.exceptions.ClientError as put_e:
-                    if put_e.response['Error']['Code'] == 'PreconditionFailed':
-                        print(f"Race: Marker for {new_file} created by another, skipping")
-                    else:
-                        raise
-            else:
-                raise
-  
-    glue_params = []
-    skipped_jobs = []
-  
-    for job in config_jobs:
-        file_name = job['source_file_path'].split('/')[-1]
-        if file_name in s3_files:
-            if job.get('is_active', False):
-                glue_params.append({
-                    'job_id': job.get('job_id', ''),
-                    'job_name': job.get('job_name', ''),
-                    'source_file_path': job.get('source_file_path', ''),
-                    'target_table': job.get('target_table', ''),
-                    'upsert_keys': job.get('upsert_keys', [])
-                })
-            else:
-                skipped_jobs.append(job.get('job_name', ''))
-  
-    if glue_params:
-        try:
-            sfn.start_execution(
-                stateMachineArn=step_function_arn,
-                name=execution_name,
-                input=json.dumps({'glue_jobs': glue_params})
+            sns.publish(
+                TopicArn=sns_topic_arn,
+                Subject='New File Found in S3',
+                Message=f'New file detected: {file_name}'
             )
-            
-            # Successful SFN start: Send aggregated SNS with all recent tracked files
-            time_window_minutes = 5  # Covers sleep + buffer
-            recent_cutoff = datetime.now(timezone.utc) - timedelta(minutes=time_window_minutes)
-            
-            tracked_response = s3.list_objects_v2(Bucket=config_bucket, Prefix=tracking_prefix)
-            tracked_files = []
-            keys_to_delete = []  # Optional cleanup
-            
-            for obj in tracked_response.get('Contents', []):
-                if obj['LastModified'] >= recent_cutoff:
-                    file_name = obj['Key'][len(tracking_prefix):]
-                    if file_name:
-                        tracked_files.append(file_name)
-                    keys_to_delete.append(obj['Key'])
-            
-            tracked_files = sorted(set(tracked_files))
-            
-            print(f"Aggregated recent tracked files: {tracked_files}")  # Debug
-            
-            if tracked_files:
-                try:
-                    sns.publish(
-                        TopicArn=sns_topic_arn,
-                        Subject='New Files Found in S3',
-                        Message=f'New files detected: {tracked_files}'
-                    )
-                    print(f"SNS sent for: {tracked_files}")
-                except Exception as e:
-                    print(f"SNS error: {e}")
-            
-            # Optional: Cleanup markers
-            # for key in keys_to_delete:
-            #     s3.delete_object(Bucket=config_bucket, Key=key)
-            
-            return {
-                'message': 'Step Function triggered',
-                'execution_name': execution_name,
-                'active_jobs': len(glue_params),
-                'new_files': list(new_files) if new_files else None
-            }
-        except sfn.exceptions.ExecutionAlreadyExists:
-            print(f"Execution {execution_name} already exists, skipping...")
-            return {'message': 'Execution already exists, skipping'}
-  
-    return {'message': 'No matching files', 'new_files': list(new_files) if new_files else None}
+            print(f"SNS notification sent for new file: {file_name}")
+            return {'message': 'SNS sent for new file'}
+        except Exception as e:
+            print(f"SNS publish error: {e}")
+            return {'message': 'SNS error'}
+    else:
+        print(f"File {file_name} already in config; no SNS sent.")
+        return {'message': 'File in config, no action'}
