@@ -74,6 +74,37 @@ def lambda_handler(event, context):
     config_files = {job['source_file_path'].split('/')[-1] for job in config_jobs}
     new_files = s3_files - config_files
   
+    # Marker-based deduplication for SNS
+    tracking_prefix = 'tracked/'  # Prefix for marker objects
+  
+    claimed_new_files = []
+  
+    for new_file in new_files:
+        marker_key = f"{tracking_prefix}{new_file}"
+        try:
+            s3.put_object(
+                Bucket=config_bucket,  # Using config_bucket for markers
+                Key=marker_key,
+                Body='',  # Empty body for marker
+                IfNoneMatch='*'  # Conditional: only if doesn't exist
+            )
+            # Success: this invocation claims it
+            claimed_new_files.append(new_file)
+        except s3.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == 'PreconditionFailed':
+                # Already exists, skip
+                print(f"Marker for {new_file} already exists, skipping notification claim")
+            else:
+                raise  # Rethrow other errors
+  
+    # Send SNS only if this invocation claimed any new files
+    if claimed_new_files:
+        sns.publish(
+            TopicArn=sns_topic_arn,
+            Subject='New Files Found in S3',
+            Message=f'New files detected: {claimed_new_files}'
+        )
+  
     glue_params = []
     skipped_jobs = []
   
@@ -91,24 +122,13 @@ def lambda_handler(event, context):
             else:
                 skipped_jobs.append(job.get('job_name', ''))
   
-    # Determine if action is needed
-    action_needed = bool(new_files) or bool(glue_params)
-  
-    if action_needed:
+    if glue_params:
         try:
-            input_payload = {'glue_jobs': glue_params}
             sfn.start_execution(
                 stateMachineArn=step_function_arn,
                 name=execution_name,
-                input=json.dumps(input_payload)
+                input=json.dumps({'glue_jobs': glue_params})
             )
-            # Lock acquired successfully
-            if new_files:
-                sns.publish(
-                    TopicArn=sns_topic_arn,
-                    Subject='New Files Found in S3',
-                    Message=f'New files detected: {list(new_files)}'
-                )
             return {
                 'message': 'Step Function triggered',
                 'execution_name': execution_name,
