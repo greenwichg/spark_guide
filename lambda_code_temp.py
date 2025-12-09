@@ -2,7 +2,7 @@ import json
 import boto3
 import os
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 s3 = boto3.client('s3')
 sns = boto3.client('sns')
@@ -19,9 +19,6 @@ def lambda_handler(event, context):
     # Fixed test name - ONLY ONE can run
     execution_name = "test-run-001"
   
-    # Note the approximate start time for later filtering
-    start_time = datetime.now(timezone.utc) - timedelta(seconds=10)  # Buffer for invocation lag
-  
     # Check if execution already exists
     try:
         exec_arn = f"{step_function_arn.replace(':stateMachine:', ':execution:')}:{execution_name}"
@@ -33,7 +30,7 @@ def lambda_handler(event, context):
     except Exception as e:
         print(f"Describe error: {e}")
   
-    # Wait 90 seconds to batch potential concurrent triggers
+    # Wait 90 seconds
     time.sleep(90)
   
     # Double-check after waiting
@@ -79,27 +76,51 @@ def lambda_handler(event, context):
   
     print(f"Detected new_files: {list(new_files)}")  # Debug
   
-    # Marker-based claiming (still useful for per-file dedup if needed)
+    # Marker-based deduplication with existence check
     tracking_prefix = 'tracked/'
-    claimed_new_files = []  # Optional: Track local claims if needed
+    claimed_new_files = []
   
     for new_file in new_files:
         marker_key = f"{tracking_prefix}{new_file}"
         try:
-            s3.put_object(
-                Bucket=config_bucket,
-                Key=marker_key,
-                Body='',
-                IfNoneMatch='*'
-            )
-            claimed_new_files.append(new_file)
-            print(f"Successfully claimed marker for: {new_file}")
+            # Check if marker already exists (efficient head_object)
+            s3.head_object(Bucket=config_bucket, Key=marker_key)
+            print(f"Marker for {new_file} already exists, skipping creation and claim")
         except s3.exceptions.ClientError as e:
-            if e.response['Error']['Code'] == 'PreconditionFailed':
-                print(f"Marker for {new_file} already exists, skipping claim")
+            if e.response['Error']['Code'] == '404':  # Does not exist
+                try:
+                    # Attempt atomic create
+                    s3.put_object(
+                        Bucket=config_bucket,
+                        Key=marker_key,
+                        Body='',
+                        IfNoneMatch='*'
+                    )
+                    claimed_new_files.append(new_file)
+                    print(f"Successfully claimed and created marker for: {new_file}")
+                except s3.exceptions.ClientError as put_e:
+                    if put_e.response['Error']['Code'] == 'PreconditionFailed':
+                        print(f"Race detected: Marker for {new_file} created by another Lambda, skipping")
+                    else:
+                        print(f"S3 put_object error for {new_file}: {put_e}")
+                        raise
             else:
-                print(f"S3 put_object error for {new_file}: {e}")
+                print(f"S3 head_object error for {new_file}: {e}")
                 raise
+  
+    print(f"Claimed new files this invocation: {claimed_new_files}")  # Debug
+  
+    # Send SNS only if this invocation claimed any new files (i.e., it's the 'first' for those)
+    if claimed_new_files:
+        try:
+            sns.publish(
+                TopicArn=sns_topic_arn,
+                Subject='New Files Found in S3',
+                Message=f'New files detected: {claimed_new_files}'
+            )
+            print(f"SNS notification sent for: {claimed_new_files}")
+        except Exception as e:
+            print(f"SNS publish error: {e}")
   
     glue_params = []
     skipped_jobs = []
@@ -125,47 +146,6 @@ def lambda_handler(event, context):
                 name=execution_name,
                 input=json.dumps({'glue_jobs': glue_params})
             )
-            
-            # Successful SFN start: Now list recent tracked files and send single SNS
-            time_window_minutes = 5  # Adjust based on your batch window (e.g., >90s sleep)
-            recent_cutoff = datetime.now(timezone.utc) - timedelta(minutes=time_window_minutes)
-            
-            # List all markers in tracked/
-            tracked_response = s3.list_objects_v2(Bucket=config_bucket, Prefix=tracking_prefix)
-            tracked_files = []
-            keys_to_delete = []  # For optional cleanup
-            
-            for obj in tracked_response.get('Contents', []):
-                key = obj['Key']
-                last_modified = obj['LastModified']
-                
-                # Filter recent ones
-                if last_modified >= recent_cutoff:
-                    file_name = key[len(tracking_prefix):]  # Strip prefix to get original file name
-                    if file_name:  # Avoid empty keys
-                        tracked_files.append(file_name)
-                    keys_to_delete.append(key)  # Collect for deletion if desired
-            
-            tracked_files = sorted(set(tracked_files))  # Dedup and sort for clean output
-            
-            print(f"Recent tracked files: {tracked_files}")  # Debug
-            
-            if tracked_files:
-                try:
-                    sns.publish(
-                        TopicArn=sns_topic_arn,
-                        Subject='New Files Found in S3',
-                        Message=f'New files detected: {tracked_files}'
-                    )
-                    print(f"SNS notification sent for: {tracked_files}")
-                except Exception as e:
-                    print(f"SNS publish error: {e}")
-            
-            # Optional: Delete the recent markers after sending (uncomment if needed)
-            # for key in keys_to_delete:
-            #     s3.delete_object(Bucket=config_bucket, Key=key)
-            #     print(f"Deleted marker: {key}")
-            
             return {
                 'message': 'Step Function triggered',
                 'execution_name': execution_name,
