@@ -2,7 +2,7 @@ import json
 import boto3
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 s3 = boto3.client('s3')
 sns = boto3.client('sns')
@@ -30,7 +30,7 @@ def lambda_handler(event, context):
     except Exception as e:
         print(f"Describe error: {e}")
   
-    # Wait 90 seconds
+    # Wait 90 seconds to batch concurrent triggers
     time.sleep(90)
   
     # Double-check after waiting
@@ -76,20 +76,18 @@ def lambda_handler(event, context):
   
     print(f"Detected new_files: {list(new_files)}")  # Debug
   
-    # Marker-based deduplication with existence check
+    # Marker creation with dedup
     tracking_prefix = 'tracked/'
-    claimed_new_files = []
+    claimed_new_files = []  # For debug; not used for SNS
   
     for new_file in new_files:
         marker_key = f"{tracking_prefix}{new_file}"
         try:
-            # Check if marker already exists (efficient head_object)
             s3.head_object(Bucket=config_bucket, Key=marker_key)
-            print(f"Marker for {new_file} already exists, skipping creation and claim")
+            print(f"Marker for {new_file} already exists, skipping")
         except s3.exceptions.ClientError as e:
-            if e.response['Error']['Code'] == '404':  # Does not exist
+            if e.response['Error']['Code'] == '404':
                 try:
-                    # Attempt atomic create
                     s3.put_object(
                         Bucket=config_bucket,
                         Key=marker_key,
@@ -97,30 +95,14 @@ def lambda_handler(event, context):
                         IfNoneMatch='*'
                     )
                     claimed_new_files.append(new_file)
-                    print(f"Successfully claimed and created marker for: {new_file}")
+                    print(f"Created marker for: {new_file}")
                 except s3.exceptions.ClientError as put_e:
                     if put_e.response['Error']['Code'] == 'PreconditionFailed':
-                        print(f"Race detected: Marker for {new_file} created by another Lambda, skipping")
+                        print(f"Race: Marker for {new_file} created by another, skipping")
                     else:
-                        print(f"S3 put_object error for {new_file}: {put_e}")
                         raise
             else:
-                print(f"S3 head_object error for {new_file}: {e}")
                 raise
-  
-    print(f"Claimed new files this invocation: {claimed_new_files}")  # Debug
-  
-    # Send SNS only if this invocation claimed any new files (i.e., it's the 'first' for those)
-    if claimed_new_files:
-        try:
-            sns.publish(
-                TopicArn=sns_topic_arn,
-                Subject='New Files Found in S3',
-                Message=f'New files detected: {claimed_new_files}'
-            )
-            print(f"SNS notification sent for: {claimed_new_files}")
-        except Exception as e:
-            print(f"SNS publish error: {e}")
   
     glue_params = []
     skipped_jobs = []
@@ -146,6 +128,41 @@ def lambda_handler(event, context):
                 name=execution_name,
                 input=json.dumps({'glue_jobs': glue_params})
             )
+            
+            # Successful SFN start: Send aggregated SNS with all recent tracked files
+            time_window_minutes = 5  # Covers sleep + buffer
+            recent_cutoff = datetime.now(timezone.utc) - timedelta(minutes=time_window_minutes)
+            
+            tracked_response = s3.list_objects_v2(Bucket=config_bucket, Prefix=tracking_prefix)
+            tracked_files = []
+            keys_to_delete = []  # Optional cleanup
+            
+            for obj in tracked_response.get('Contents', []):
+                if obj['LastModified'] >= recent_cutoff:
+                    file_name = obj['Key'][len(tracking_prefix):]
+                    if file_name:
+                        tracked_files.append(file_name)
+                    keys_to_delete.append(obj['Key'])
+            
+            tracked_files = sorted(set(tracked_files))
+            
+            print(f"Aggregated recent tracked files: {tracked_files}")  # Debug
+            
+            if tracked_files:
+                try:
+                    sns.publish(
+                        TopicArn=sns_topic_arn,
+                        Subject='New Files Found in S3',
+                        Message=f'New files detected: {tracked_files}'
+                    )
+                    print(f"SNS sent for: {tracked_files}")
+                except Exception as e:
+                    print(f"SNS error: {e}")
+            
+            # Optional: Cleanup markers
+            # for key in keys_to_delete:
+            #     s3.delete_object(Bucket=config_bucket, Key=key)
+            
             return {
                 'message': 'Step Function triggered',
                 'execution_name': execution_name,
