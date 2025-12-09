@@ -50,9 +50,6 @@ def lambda_handler(event, context):
     # Get config files
     config_files = {job['source_file_path'].split('/')[-1] for job in config_jobs}
 
-    # Fixed test name - ONLY ONE can run
-    execution_name = "test-run-001"
-
     if file_name in config_files:
         # If file is in config, trigger Step Function
         glue_params = []
@@ -70,21 +67,18 @@ def lambda_handler(event, context):
                 break  # Assume one match per file
 
         if glue_params:
-            try:
-                sfn.start_execution(
-                    stateMachineArn=step_function_arn,
-                    name=execution_name,
-                    input=json.dumps({'glue_jobs': glue_params})
-                )
-                print(f"Step Function triggered for file: {file_name}")
-                return {
-                    'message': 'Step Function triggered',
-                    'execution_name': execution_name,
-                    'active_jobs': len(glue_params)
-                }
-            except sfn.exceptions.ExecutionAlreadyExists:
-                print(f"Execution {execution_name} already exists, skipping...")
-                return {'message': 'Execution already exists, skipping'}
+            execution_name = f"run-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"  # Dynamic for concurrency
+            sfn.start_execution(
+                stateMachineArn=step_function_arn,
+                name=execution_name,
+                input=json.dumps({'glue_jobs': glue_params})
+            )
+            print(f"Step Function triggered for file: {file_name}")
+            return {
+                'message': 'Step Function triggered',
+                'execution_name': execution_name,
+                'active_jobs': len(glue_params)
+            }
         else:
             print(f"No active job in config for file {file_name}; no action.")
             return {'message': 'No active job, no action'}
