@@ -12,7 +12,7 @@ def lambda_handler(event, context):
     config_key = os.environ['CONFIG_KEY']
     sns_topic_arn = os.environ['SNS_TOPIC_ARN']
     step_function_arn = os.environ['STEP_FUNCTION_ARN']
- 
+
     # Extract bucket and key from S3 event
     if 'Records' in event and len(event['Records']) > 0:
         s3_record = event['Records'][0].get('s3', {})
@@ -21,22 +21,22 @@ def lambda_handler(event, context):
         if not bucket or not key:
             print("Invalid S3 event structure; skipping.")
             return {'message': 'Invalid event'}
-       
+      
         # Extract file name from key
-        file_name = key.split('/')[-1]
+        file_name = key.split('/')[-1].strip().lower()  # Normalize: strip whitespace, lowercase
         if not file_name.endswith('.csv'):
             print(f"File {file_name} is not a CSV; skipping.")
             return {'message': 'Non-CSV file'}
-       
+      
         print(f"Processing file: {file_name}")
     else:
         print("No valid S3 records in event; skipping.")
         return {'message': 'No S3 records'}
- 
+
     # Read config.json
     config_data = s3.get_object(Bucket=config_bucket, Key=config_key)
     content = config_data['Body'].read().decode('utf-8')
- 
+
     config_jobs = []
     content = content.strip()
     if content.startswith('['):
@@ -47,15 +47,20 @@ def lambda_handler(event, context):
             obj, idx = decoder.raw_decode(content)
             config_jobs.append(obj)
             content = content[idx:].strip()
- 
-    # Get config files
-    config_files = {job['source_file_path'].split('/')[-1] for job in config_jobs}
- 
+
+    # Get config files with normalization: strip whitespace, lowercase
+    config_files = {job['source_file_path'].split('/')[-1].strip().lower() for job in config_jobs}
+
+    # Debug logging for match check
+    print(f"DEBUG: Normalized config basenames: {sorted(list(config_files))}")
+    print(f"DEBUG: Normalized uploaded file: '{file_name}'")
+    print(f"DEBUG: Match in config? {file_name in config_files}")
+
     if file_name in config_files:
         # If file is in config, trigger Step Function
         glue_params = []
         for job in config_jobs:
-            job_file_name = job['source_file_path'].split('/')[-1]
+            job_file_name = job['source_file_path'].split('/')[-1].strip().lower()
             if job_file_name == file_name:
                 if job.get('is_active', False):
                     glue_params.append({
@@ -66,6 +71,7 @@ def lambda_handler(event, context):
                         'upsert_keys': job.get('upsert_keys', [])
                     })
                 break  # Assume one match per file
+
         if glue_params:
             execution_name = f"run-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"  # Dynamic for concurrency
             sfn.start_execution(
