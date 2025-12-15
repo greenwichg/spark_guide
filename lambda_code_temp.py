@@ -83,6 +83,14 @@ def lambda_handler(event, context):
 
         print("Detected config.json upload → processing all data/in/*.csv")
 
+        # Send simple SNS notification
+        sns.publish(
+            TopicArn=SNS_TOPIC_ARN,
+            Subject="Config.json Uploaded",
+            Message=f"Config.json has been uploaded.\n\nBucket: {bucket}\nKey: {key}"
+        )
+        print("📧 Config upload notification sent")
+
         response = s3.list_objects_v2(Bucket=bucket, Prefix="data/in/")
         if "Contents" not in response:
             print("No data files found under data/in/")
