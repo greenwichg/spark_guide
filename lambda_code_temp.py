@@ -3,97 +3,162 @@ import boto3
 import os
 from datetime import datetime, timezone
 
-s3 = boto3.client('s3')
-sns = boto3.client('sns')
-sfn = boto3.client('stepfunctions')
+s3 = boto3.client("s3")
+sns = boto3.client("sns")
+sfn = boto3.client("stepfunctions")
+
+
+def normalize(name: str) -> str:
+    return name.strip().lower()
+
+
+def build_glue_job(job, file_name=None):
+    return {
+        "job_id": job["job_id"],
+        "job_name": job["job_name"],
+        "source_file_name": file_name or job["source_file_name"],
+        "target_table": job["target_table"],
+        "upsert_keys": job["upsert_keys"]
+    }
+
 
 def lambda_handler(event, context):
-    config_bucket = os.environ['CONFIG_BUCKET']
-    config_key = os.environ['CONFIG_KEY']
-    sns_topic_arn = os.environ['SNS_TOPIC_ARN']
-    step_function_arn = os.environ['STEP_FUNCTION_ARN']
 
-    # Extract bucket and key from S3 event
-    if 'Records' in event and len(event['Records']) > 0:
-        s3_record = event['Records'][0].get('s3', {})
-        bucket = s3_record.get('bucket', {}).get('name')
-        key = s3_record.get('object', {}).get('key')
-        if not bucket or not key:
-            print("Invalid S3 event structure; skipping.")
-            return {'message': 'Invalid event'}
-      
-        # Extract file name from key
-        file_name = key.split('/')[-1].strip().lower()  # Normalize: strip whitespace, lowercase
-        if not file_name.endswith('.csv'):
-            print(f"File {file_name} is not a CSV; skipping.")
-            return {'message': 'Non-CSV file'}
-      
-        print(f"Processing file: {file_name}")
-    else:
-        print("No valid S3 records in event; skipping.")
-        return {'message': 'No S3 records'}
+    # ---------------------------------------------------------
+    # DEFENSIVE LOGGING (VERY IMPORTANT)
+    # ---------------------------------------------------------
+    print("🚀 Lambda invoked")
+    print(json.dumps(event))
 
-    # Read config.json
-    config_data = s3.get_object(Bucket=config_bucket, Key=config_key)
-    content = config_data['Body'].read().decode('utf-8')
+    if event.get("source") != "aws.s3":
+        print("Not an EventBridge S3 event → ignoring")
+        return {"message": "Ignored non-S3 event"}
 
-    config_jobs = []
-    content = content.strip()
-    if content.startswith('['):
-        config_jobs = json.loads(content)
-    else:
-        decoder = json.JSONDecoder()
-        while content:
-            obj, idx = decoder.raw_decode(content)
-            config_jobs.append(obj)
-            content = content[idx:].strip()
+    # ---------------------------------------------------------
+    # EXTRACT EVENT DETAILS
+    # ---------------------------------------------------------
+    detail = event.get("detail", {})
+    bucket = detail["bucket"]["name"]
+    key = detail["object"]["key"]
 
-    # Get config files with normalization: strip whitespace, lowercase
-    config_files = {job['source_file_path'].split('/')[-1].strip().lower() for job in config_jobs}
+    print(f"Processing S3 event → bucket={bucket}, key={key}")
 
-    # Debug logging for match check
-    print(f"DEBUG: Normalized config basenames: {sorted(list(config_files))}")
-    print(f"DEBUG: Normalized uploaded file: '{file_name}'")
-    print(f"DEBUG: Match in config? {file_name in config_files}")
+    # ---------------------------------------------------------
+    # ENV VARIABLES
+    # ---------------------------------------------------------
+    CONFIG_BUCKET = os.environ["CONFIG_BUCKET"]
+    CONFIG_KEY = os.environ["CONFIG_KEY"]
+    SNS_TOPIC_ARN = os.environ["SNS_TOPIC_ARN"]
+    STEP_FUNCTION_ARN = os.environ["STEP_FUNCTION_ARN"]
 
-    if file_name in config_files:
-        # If file is in config, trigger Step Function
-        glue_params = []
-        for job in config_jobs:
-            job_file_name = job['source_file_path'].split('/')[-1].strip().lower()
-            if job_file_name == file_name:
-                if job.get('is_active', False):
-                    glue_params.append({
-                        'job_id': job.get('job_id', ''),
-                        'job_name': job.get('job_name', ''),
-                        'source_file_path': job.get('source_file_path', ''),
-                        'target_table': job.get('target_table', ''),
-                        'upsert_keys': job.get('upsert_keys', [])
-                    })
-                break  # Assume one match per file
+    # ---------------------------------------------------------
+    # LOAD CONFIG.JSON
+    # ---------------------------------------------------------
+    try:
+        config_obj = s3.get_object(Bucket=CONFIG_BUCKET, Key=CONFIG_KEY)
+        config_jobs = json.loads(config_obj["Body"].read().decode("utf-8"))
+    except Exception as e:
+        print(f"Failed to load config.json: {e}")
+        raise
 
-        if glue_params:
-            execution_name = f"run-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"  # Dynamic for concurrency
-            sfn.start_execution(
-                stateMachineArn=step_function_arn,
-                name=execution_name,
-                input=json.dumps({'glue_jobs': glue_params})
+    # ---------------------------------------------------------
+    # CASE 1: CONFIG.JSON UPLOADED → RE-RUN ALL DATA FILES
+    # ---------------------------------------------------------
+    if key.startswith("config/") and key.endswith(".json"):
+
+        print("Detected config.json upload → processing all data/in/*.csv")
+
+        response = s3.list_objects_v2(Bucket=bucket, Prefix="data/in/")
+        if "Contents" not in response:
+            print("No data files found under data/in/")
+            return {"message": "No data files found"}
+
+        for obj in response["Contents"]:
+            if not obj["Key"].endswith(".csv"):
+                continue
+
+            file_name = obj["Key"].split("/")[-1]
+            normalized_file = normalize(file_name)
+
+            for job in config_jobs:
+                # FIX: Extract filename from config path
+                config_file = normalize(job["source_file_name"].split("/")[-1])
+
+                if normalized_file == config_file and job.get("is_active", False):
+
+                    execution_name = (
+                        f"run-{job['job_id']}-"
+                        f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+                    )
+
+                    sfn.start_execution(
+                        stateMachineArn=STEP_FUNCTION_ARN,
+                        name=execution_name,
+                        input=json.dumps({
+                            "glue_jobs": [
+                                build_glue_job(job, file_name)
+                            ]
+                        })
+                    )
+
+                    print(f"Triggered job for {file_name}")
+
+        return {"message": "Config refresh completed"}
+
+    # ---------------------------------------------------------
+    # CASE 2: NEW FILE ARRIVED IN data/in/
+    # ---------------------------------------------------------
+    if key.startswith("data/in/") and key.endswith(".csv"):
+
+        file_name = key.split("/")[-1]
+        normalized_file = normalize(file_name)
+
+        print(f"Processing new data file → {file_name}")
+
+        matched_jobs = [
+            build_glue_job(job, file_name)
+            for job in config_jobs
+            # FIX: Extract filename from config path
+            if normalize(job["source_file_name"].split("/")[-1]) == normalized_file
+            and job.get("is_active", False)
+        ]
+
+        if matched_jobs:
+
+            execution_name = (
+                f"run-{normalized_file}-"
+                f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
             )
-            print(f"Step Function triggered for file: {file_name}")
-            return {
-                'message': 'Step Function triggered',
-                'execution_name': execution_name,
-                'active_jobs': len(glue_params)
-            }
-        else:
-            print(f"No active job in config for file {file_name}; no action.")
-            return {'message': 'No active job, no action'}
-    else:
-        # If not in config, send SNS
+
+            sfn.start_execution(
+                stateMachineArn=STEP_FUNCTION_ARN,
+                name=execution_name,
+                input=json.dumps({
+                    "glue_jobs": matched_jobs
+                })
+            )
+
+            print(f"Step Function triggered for {file_name}")
+            return {"message": "Job triggered"}
+
+        # -----------------------------------------------------
+        # FILE NOT IN CONFIG → SNS ALERT
+        # -----------------------------------------------------
         sns.publish(
-            TopicArn=sns_topic_arn,
-            Subject='New File Found in S3',
-            Message=f'New file detected: {file_name}'
+            TopicArn=SNS_TOPIC_ARN,
+            Subject="Unmapped S3 CSV File Uploaded",
+            Message=(
+                f"A CSV file was uploaded but not found in config.json\n\n"
+                f"Bucket: {bucket}\n"
+                f"Key: {key}"
+            )
         )
-        print(f"SNS notification sent for new file: {file_name}")
-        return {'message': 'SNS sent for new file'}
+
+        print(f"SNS sent for unmapped file → {file_name}")
+        return {"message": "SNS sent for unmapped file"}
+
+    # ---------------------------------------------------------
+    # CASE 3: EVERYTHING ELSE → IGNORE
+    # ---------------------------------------------------------
+    print("Ignoring non-relevant S3 event")
+    return {"message": "Ignored"}
