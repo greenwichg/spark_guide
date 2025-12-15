@@ -1,6 +1,7 @@
 import json
 import boto3
 import os
+import re
 from datetime import datetime, timezone
 
 s3 = boto3.client("s3")
@@ -10,6 +11,20 @@ sfn = boto3.client("stepfunctions")
 
 def normalize(name: str) -> str:
     return name.strip().lower()
+
+
+def sanitize_execution_name(name: str) -> str:
+    """
+    Sanitize string for Step Function execution name.
+    Only allows: alphanumeric, hyphens, underscores.
+    Max length: 80 characters.
+    """
+    # Replace spaces and dots with hyphens
+    sanitized = name.replace(' ', '-').replace('.', '-')
+    # Remove any character that's not alphanumeric, hyphen, or underscore
+    sanitized = re.sub(r'[^a-zA-Z0-9_-]', '', sanitized)
+    # Ensure it doesn't exceed 80 characters (leaving room for timestamp)
+    return sanitized[:50]
 
 
 def build_glue_job(job, file_name=None):
@@ -81,7 +96,7 @@ def lambda_handler(event, context):
             normalized_file = normalize(file_name)
 
             for job in config_jobs:
-                # FIX: Extract filename from config path
+                # Extract filename from config path
                 config_file = normalize(job["source_file_name"].split("/")[-1])
 
                 if normalized_file == config_file and job.get("is_active", False):
@@ -101,7 +116,7 @@ def lambda_handler(event, context):
                         })
                     )
 
-                    print(f"Triggered job for {file_name}")
+                    print(f"Triggered job for {file_name} → execution: {execution_name}")
 
         return {"message": "Config refresh completed"}
 
@@ -118,15 +133,17 @@ def lambda_handler(event, context):
         matched_jobs = [
             build_glue_job(job, file_name)
             for job in config_jobs
-            # FIX: Extract filename from config path
+            # Extract filename from config path
             if normalize(job["source_file_name"].split("/")[-1]) == normalized_file
             and job.get("is_active", False)
         ]
 
         if matched_jobs:
 
+            # Use job_id from first matched job for execution name
+            safe_name = sanitize_execution_name(normalized_file)
             execution_name = (
-                f"run-{normalized_file}-"
+                f"run-{safe_name}-"
                 f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
             )
 
@@ -138,8 +155,12 @@ def lambda_handler(event, context):
                 })
             )
 
-            print(f"Step Function triggered for {file_name}")
-            return {"message": "Job triggered"}
+            print(f"Step Function triggered for {file_name} → execution: {execution_name}")
+            return {
+                "message": "Job triggered",
+                "file": file_name,
+                "execution_name": execution_name
+            }
 
         # -----------------------------------------------------
         # FILE NOT IN CONFIG → SNS ALERT
