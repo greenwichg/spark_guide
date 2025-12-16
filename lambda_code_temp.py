@@ -59,6 +59,13 @@ def lambda_handler(event, context):
     print(f"Processing S3 event → bucket={bucket}, key={key}")
 
     # ---------------------------------------------------------
+    # IGNORE STAGING AND ARCHIVE FILES
+    # ---------------------------------------------------------
+    if key.startswith("data/staging/") or key.startswith("data/archive/"):
+        print(f"⏭️  Ignoring file in staging/archive: {key}")
+        return {"message": "Ignored - staging/archive file"}
+
+    # ---------------------------------------------------------
     # ENV VARIABLES
     # ---------------------------------------------------------
     CONFIG_BUCKET = os.environ["CONFIG_BUCKET"]
