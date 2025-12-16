@@ -6,9 +6,15 @@
       "name": ["nyl-invgai-dev-anaplan"]
     },
     "object": {
-      "key": [{
-        "prefix": "data/in/"
-      }]
-    }
+      "key": [
+        {
+          "prefix": "data/in/"
+        },
+        {
+          "prefix": "config/"
+        }
+      ]
+    },
+    "reason": ["PutObject", "CompleteMultipartUpload", "CopyObject"]
   }
 }
