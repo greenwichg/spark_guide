@@ -145,53 +145,97 @@ def lambda_handler(event, context):
 
         print(f"Processing new data file → {file_name}")
 
-        matched_jobs = [
-            build_glue_job(job, file_name)
-            for job in config_jobs
-            # Extract filename from config path
-            if normalize(job["source_file_name"].split("/")[-1]) == normalized_file
-            and job.get("is_active", False)
-        ]
+        # Find matching job (active or inactive)
+        matching_job = None
+        for job in config_jobs:
+            config_file = normalize(job["source_file_name"].split("/")[-1])
+            if config_file == normalized_file:
+                matching_job = job
+                break
 
-        if matched_jobs:
-
-            # Use job_id from first matched job for execution name
-            safe_name = sanitize_execution_name(normalized_file)
-            execution_name = (
-                f"run-{safe_name}-"
-                f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+        # ---------------------------------------------------------
+        # CASE 2A: FILE NOT IN CONFIG AT ALL
+        # ---------------------------------------------------------
+        if not matching_job:
+            sns.publish(
+                TopicArn=SNS_TOPIC_ARN,
+                Subject="⚠️ Unmapped S3 CSV File Uploaded",
+                Message=(
+                    f"A CSV file was uploaded but not found in config.json\n\n"
+                    f"📁 File Details:\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"• Bucket: {bucket}\n"
+                    f"• Key: {key}\n"
+                    f"• File Name: {file_name}\n\n"
+                    f"⚡ Action Required:\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"1. Add this file to config.json with appropriate job configuration, OR\n"
+                    f"2. Remove the file from data/in/ if uploaded by mistake\n\n"
+                    f"This is an automated notification from the ETL pipeline."
+                )
             )
+            print(f"📧 SNS sent for unmapped file → {file_name}")
+            return {"message": "SNS sent for unmapped file", "file": file_name}
 
-            sfn.start_execution(
-                stateMachineArn=STEP_FUNCTION_ARN,
-                name=execution_name,
-                input=json.dumps({
-                    "glue_jobs": matched_jobs
-                })
+        # ---------------------------------------------------------
+        # CASE 2B: FILE IN CONFIG BUT JOB IS INACTIVE
+        # ---------------------------------------------------------
+        if not matching_job.get("is_active", False):
+            sns.publish(
+                TopicArn=SNS_TOPIC_ARN,
+                Subject="⏸️ CSV File Upload Skipped - Job Inactive",
+                Message=(
+                    f"A CSV file was uploaded but its job is marked as inactive in config.json\n\n"
+                    f"📁 File Details:\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"• Bucket: {bucket}\n"
+                    f"• Key: {key}\n"
+                    f"• File Name: {file_name}\n\n"
+                    f"📋 Job Details:\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"• Job ID: {matching_job['job_id']}\n"
+                    f"• Job Name: {matching_job['job_name']}\n"
+                    f"• Target Table: {matching_job['target_table']}\n"
+                    f"• Status: INACTIVE\n\n"
+                    f"⚡ Action Required:\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"Set 'is_active: true' in config.json to process this file.\n\n"
+                    f"This is an automated notification from the ETL pipeline."
+                )
             )
-
-            print(f"Step Function triggered for {file_name} → execution: {execution_name}")
+            print(f"📧 SNS sent for inactive job → {file_name} (job_id: {matching_job['job_id']})")
             return {
-                "message": "Job triggered",
+                "message": "SNS sent for inactive job",
                 "file": file_name,
-                "execution_name": execution_name
+                "job_id": matching_job["job_id"]
             }
 
-        # -----------------------------------------------------
-        # FILE NOT IN CONFIG → SNS ALERT
-        # -----------------------------------------------------
-        sns.publish(
-            TopicArn=SNS_TOPIC_ARN,
-            Subject="Unmapped S3 CSV File Uploaded",
-            Message=(
-                f"A CSV file was uploaded but not found in config.json\n\n"
-                f"Bucket: {bucket}\n"
-                f"Key: {key}"
-            )
+        # ---------------------------------------------------------
+        # CASE 2C: FILE IN CONFIG AND JOB IS ACTIVE → TRIGGER
+        # ---------------------------------------------------------
+        matched_jobs = [build_glue_job(matching_job, file_name)]
+
+        safe_name = sanitize_execution_name(normalized_file)
+        execution_name = (
+            f"run-{safe_name}-"
+            f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
         )
 
-        print(f"SNS sent for unmapped file → {file_name}")
-        return {"message": "SNS sent for unmapped file"}
+        sfn.start_execution(
+            stateMachineArn=STEP_FUNCTION_ARN,
+            name=execution_name,
+            input=json.dumps({
+                "glue_jobs": matched_jobs
+            })
+        )
+
+        print(f"✅ Step Function triggered for {file_name} → execution: {execution_name}")
+        return {
+            "message": "Job triggered",
+            "file": file_name,
+            "job_id": matching_job["job_id"],
+            "execution_name": execution_name
+        }
 
     # ---------------------------------------------------------
     # CASE 3: EVERYTHING ELSE → IGNORE
