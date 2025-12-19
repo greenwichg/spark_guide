@@ -1,0 +1,15 @@
+1. SFTP Server Details:
+   □ Server hostname/IP
+   □ Port number
+   □ Maximum concurrent connections supported
+   □ Any authentication rate limits?
+
+2. Network Configuration:
+   □ Any firewall rules we should be aware of?
+   □ Do we need to whitelist AWS IP ranges?
+   □ Connection timeout settings?
+
+3. Monitoring:
+   □ Does your team want alerts for connections?
+   □ Any logging requirements on your end?
+   □ Preferred notification method for issues?
