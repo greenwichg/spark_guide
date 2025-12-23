@@ -35,9 +35,9 @@ def build_glue_job(job, file_name=None):
     }
 
 
-def move_to_unprocessed(bucket, source_key):
+def move_to_new_file(bucket, source_key):
     """
-    Move file from data/in/ to data/unprocessed/
+    Move unmapped/new file from data/in/ to data/new_files/
     
     Args:
         bucket: S3 bucket name
@@ -50,10 +50,10 @@ def move_to_unprocessed(bucket, source_key):
         # Extract filename from source key
         file_name = source_key.split("/")[-1]
         
-        # Build destination key - just move to data/unprocessed/
-        destination_key = f"data/unprocessed/{file_name}"
+        # Build destination key - move to data/new_files/ prefix
+        destination_key = f"data/new_files/{file_name}"
         
-        print(f"Moving file from {source_key} to {destination_key}")
+        print(f"Moving unmapped file from {source_key} to {destination_key}")
         
         # Copy file to new location
         s3.copy_object(
@@ -68,11 +68,11 @@ def move_to_unprocessed(bucket, source_key):
             Key=source_key
         )
         
-        print(f"Successfully moved file to {destination_key}")
+        print(f"Successfully moved unmapped file to {destination_key}")
         return destination_key
         
     except ClientError as e:
-        print(f"Failed to move file to unprocessed: {e}")
+        print(f"Failed to move file to data/new_files: {e}")
         return None
 
 
@@ -168,10 +168,10 @@ def lambda_handler(event, context):
         print("Ignoring staging/archive file")
         return {"message": "Staging/archive file ignored"}
     
-    # Skip unprocessed folder (to avoid loops)
-    if key.startswith("data/unprocessed/"):
-        print("Ignoring file already in unprocessed folder")
-        return {"message": "Unprocessed file ignored"}
+    # Skip new_files folder (to avoid loops)
+    if key.startswith("data/new_files/"):
+        print("Ignoring file already in new_files folder")
+        return {"message": "New file already moved"}
 
     # Only process CSV files in data/in/
     if not key.startswith("data/in/") or not key.endswith(".csv"):
@@ -188,35 +188,6 @@ def lambda_handler(event, context):
 
     # Load config files
     config_jobs = load_all_config_files(bucket)
-    
-    if not config_jobs:
-        file_name = key.split("/")[-1]
-        
-        # Move file to unprocessed folder
-        new_location = move_to_unprocessed(bucket, key)
-        
-        # Send notification
-        send_notification(
-            SNS_TOPIC_ARN,
-            "No Config Files Found - File Moved",
-            f"File uploaded but no configuration found.\n"
-            f"File has been moved to unprocessed folder.\n\n"
-            f"Original Location: {key}\n"
-            f"New Location: {new_location}\n"
-            f"File: {file_name}\n"
-            f"Bucket: {bucket}\n\n"
-            f"Reason: No config files exist\n\n"
-            f"Action needed:\n"
-            f"- Add config files to the config/ folder\n"
-            f"- Move file back to data/in/ after configuration is added"
-        )
-        
-        return {
-            "message": "No config files - moved to unprocessed",
-            "original_location": key,
-            "new_location": new_location,
-            "reason": "no_config"
-        }
 
     # Extract filename
     file_name = key.split("/")[-1]
@@ -233,71 +204,66 @@ def lambda_handler(event, context):
             print(f"Matched with job: {job['job_id']}")
             break
 
-    # Handle unmapped file
+    # Handle unmapped/new file - MOVE TO data/new_files/
     if not matching_job:
-        print("No matching job found")
+        print("No matching job found - this is a NEW file")
         
-        # Move file to unprocessed folder
-        new_location = move_to_unprocessed(bucket, key)
+        # Move file to data/new_files/ prefix
+        new_location = move_to_new_file(bucket, key)
         
         # Send notification
         send_notification(
             SNS_TOPIC_ARN,
-            "Unmapped File Uploaded - File Moved",
-            f"File uploaded but not configured for processing.\n"
-            f"File has been moved to unprocessed folder.\n\n"
+            "New File Uploaded - Moved to data/new_files/",
+            f"A new file (not in config) was uploaded.\n"
+            f"File has been moved to data/new_files/ folder.\n\n"
             f"Original Location: {key}\n"
             f"New Location: {new_location}\n"
             f"File: {file_name}\n"
             f"Bucket: {bucket}\n\n"
-            f"Reason: File not found in any config\n\n"
+            f"This is a NEW file that needs configuration.\n\n"
             f"Action needed:\n"
-            f"- Add configuration for this file to config.json\n"
-            f"- Move file back to data/in/ after configuration is added\n\n"
+            f"1. Review the file in data/new_files/ folder\n"
+            f"2. Add configuration to config.json\n"
+            f"3. Move file to data/in/ to process\n\n"
             f"Searched {len(config_jobs)} job configs."
         )
         
         return {
-            "message": "File not configured - moved to unprocessed",
+            "message": "New file - moved to data/new_files/",
             "original_location": key,
             "new_location": new_location,
             "reason": "unmapped"
         }
 
-    # Handle inactive job
+    # Handle inactive job - DON'T move, just notify
     if not matching_job.get("is_active", False):
         print("Job is inactive")
         
-        # Move file to unprocessed folder
-        new_location = move_to_unprocessed(bucket, key)
-        
-        # Send notification
+        # DON'T move file, just send notification
         send_notification(
             SNS_TOPIC_ARN,
-            "File Upload Skipped - Inactive Job - File Moved",
+            "File Upload Skipped - Inactive Job",
             f"File uploaded but job is currently inactive.\n"
-            f"File has been moved to unprocessed folder.\n\n"
-            f"Original Location: {key}\n"
-            f"New Location: {new_location}\n"
+            f"File remains in data/in/ folder.\n\n"
             f"File: {file_name}\n"
+            f"Location: {key}\n"
             f"Job ID: {matching_job['job_id']}\n"
             f"Job Name: {matching_job['job_name']}\n"
             f"Config: {matching_job.get('_config_source', 'unknown')}\n\n"
-            f"Reason: Job is_active set to false\n\n"
             f"Action needed:\n"
             f"- Set is_active to true in the config file\n"
-            f"- Move file back to data/in/ to reprocess"
+            f"- File will automatically process once job is activated"
         )
         
         return {
-            "message": "Job inactive - moved to unprocessed",
-            "original_location": key,
-            "new_location": new_location,
-            "job_id": matching_job["job_id"],
-            "reason": "inactive"
+            "message": "Job inactive - file remains in data/in/",
+            "file": file_name,
+            "location": key,
+            "job_id": matching_job["job_id"]
         }
 
-    # Trigger Step Functions
+    # Trigger Step Functions for active job
     safe_name = sanitize_execution_name(normalized_file)
     timestamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
     execution_name = f"run-{safe_name}-{timestamp}"
