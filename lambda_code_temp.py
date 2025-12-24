@@ -19,54 +19,39 @@ def normalize(name):
 
 def sanitize_execution_name(name):
     """Clean filename for use in Step Functions execution name"""
-    sanitized = name.replace(' ', '-').replace('.', '-')
+    sanitized = name.replace(' ', '-').replace('.', '-').replace('/', '-')
     sanitized = re.sub(r'[^a-zA-Z0-9_-]', '', sanitized)
     return sanitized[:50]
 
 
 def build_glue_job(job, file_name=None):
     """Prepare job configuration for Step Functions"""
+    source_file = file_name or job.get("source_file_name")
+    
     return {
         "job_id": job["job_id"],
         "job_name": job["job_name"],
-        "source_file_name": file_name or job["source_file_name"],
+        "source_file_name": source_file,
         "target_table": job["target_table"],
         "upsert_keys": job["upsert_keys"]
     }
 
 
 def move_to_new_file(bucket, source_key):
-    """
-    Move unmapped/new file from data/in/ to data/new_files/
-    
-    Args:
-        bucket: S3 bucket name
-        source_key: Original file key (e.g., data/in/file.csv)
-    
-    Returns:
-        str: New file location or None if failed
-    """
+    """Move unmapped/new file from data/in/ to data/new_files/"""
     try:
-        # Extract filename from source key
         file_name = source_key.split("/")[-1]
-        
-        # Build destination key - move to data/new_files/ prefix
         destination_key = f"data/new_files/{file_name}"
         
         print(f"Moving unmapped file from {source_key} to {destination_key}")
         
-        # Copy file to new location
         s3.copy_object(
             Bucket=bucket,
             CopySource={'Bucket': bucket, 'Key': source_key},
             Key=destination_key
         )
         
-        # Delete original file
-        s3.delete_object(
-            Bucket=bucket,
-            Key=source_key
-        )
+        s3.delete_object(Bucket=bucket, Key=source_key)
         
         print(f"Successfully moved unmapped file to {destination_key}")
         return destination_key
@@ -76,59 +61,29 @@ def move_to_new_file(bucket, source_key):
         return None
 
 
-def load_all_config_files(bucket, config_prefix="config/"):
-    """Load and merge all config files from S3"""
-    all_jobs = []
-    
+def load_config_file(bucket, config_path="config/config.json"):
+    """Load single config JSON file from S3"""
     try:
-        response = s3.list_objects_v2(Bucket=bucket, Prefix=config_prefix)
+        print(f"Loading config file: {config_path}")
         
-        if "Contents" not in response:
-            print(f"Warning: No config files found in {config_prefix}")
-            return []
+        config_obj = s3.get_object(Bucket=bucket, Key=config_path)
+        config_data = json.loads(config_obj["Body"].read().decode("utf-8"))
         
-        for obj in response["Contents"]:
-            config_key = obj["Key"]
-            
-            if config_key.endswith('/') or not config_key.endswith(".json"):
-                continue
-            
-            try:
-                print(f"Loading config: {config_key}")
-                config_obj = s3.get_object(Bucket=bucket, Key=config_key)
-                config_jobs = json.loads(config_obj["Body"].read().decode("utf-8"))
-                
-                if not isinstance(config_jobs, list):
-                    print(f"Skipping {config_key} - invalid format")
-                    continue
-                
-                # Track which config file each job came from
-                for job in config_jobs:
-                    job["_config_source"] = config_key
-                
-                all_jobs.extend(config_jobs)
-                print(f"Loaded {len(config_jobs)} jobs from {config_key}")
-                
-            except (ClientError, json.JSONDecodeError) as e:
-                print(f"Error loading {config_key}: {e}")
-                continue
-        
-        print(f"Total jobs loaded: {len(all_jobs)}")
-        return all_jobs
+        print(f"Loaded {len(config_data)} jobs from {config_path}")
+        return config_data
         
     except ClientError as e:
-        print(f"Failed to list config files: {e}")
-        raise
+        print(f"Failed to load config file: {e}")
+        return []
+    except json.JSONDecodeError as e:
+        print(f"Invalid JSON in config file: {e}")
+        return []
 
 
 def send_notification(topic_arn, subject, message):
     """Send email notification via SNS"""
     try:
-        sns.publish(
-            TopicArn=topic_arn,
-            Subject=subject,
-            Message=message
-        )
+        sns.publish(TopicArn=topic_arn, Subject=subject, Message=message)
         print(f"Notification sent: {subject}")
         return True
     except ClientError as e:
@@ -142,12 +97,10 @@ def lambda_handler(event, context):
     print("Lambda triggered")
     print(json.dumps(event))
 
-    # Verify this is an S3 event
     if event.get("source") != "aws.s3":
         print("Ignoring non-S3 event")
         return {"message": "Not an S3 event"}
 
-    # Get file details from event
     try:
         detail = event.get("detail", {})
         bucket = detail["bucket"]["name"]
@@ -158,27 +111,10 @@ def lambda_handler(event, context):
 
     print(f"Processing: {key} from {bucket}")
 
-    # Skip config files - they're loaded dynamically
-    if key.startswith("config/"):
-        print("Ignoring config file upload")
-        return {"message": "Config file ignored"}
-    
-    # Skip staging and archive folders
-    if key.startswith("data/staging/") or key.startswith("data/archive/"):
-        print("Ignoring staging/archive file")
-        return {"message": "Staging/archive file ignored"}
-    
-    # Skip new_files folder (to avoid loops)
-    if key.startswith("data/new_files/"):
-        print("Ignoring file already in new_files folder")
-        return {"message": "New file already moved"}
-
-    # Only process CSV files in data/in/
     if not key.startswith("data/in/") or not key.endswith(".csv"):
         print("File not in data/in/ or not CSV")
         return {"message": "File ignored"}
 
-    # Get environment variables
     try:
         SNS_TOPIC_ARN = os.environ["SNS_TOPIC_ARN"]
         STEP_FUNCTION_ARN = os.environ["STEP_FUNCTION_ARN"]
@@ -186,32 +122,39 @@ def lambda_handler(event, context):
         print(f"Missing environment variable: {e}")
         raise
 
-    # Load config files
-    config_jobs = load_all_config_files(bucket)
+    # Load config file
+    config_data = load_config_file(bucket)
 
-    # Extract filename
-    file_name = key.split("/")[-1]
-    normalized_file = normalize(file_name)
+    # Normalize the uploaded file key for comparison
+    normalized_key = normalize(key)
+    print(f"Normalized file key: {normalized_key}")
 
-    print(f"Processing file: {file_name}")
-
-    # Find matching job configuration
+    # Find matching job using normalized comparison
     matching_job = None
-    for job in config_jobs:
-        config_file = normalize(job["source_file_name"].split("/")[-1])
-        if config_file == normalized_file:
-            matching_job = job
-            print(f"Matched with job: {job['job_id']}")
+    for item in config_data:
+        source_file_name = item.get("source_file_name")
+        
+        if not source_file_name:
+            print(f"Job {item.get('job_id', 'unknown')} missing source_file_name")
+            continue
+        
+        # Normalize config path for comparison
+        normalized_config = normalize(source_file_name)
+        
+        print(f"Comparing: '{normalized_key}' == '{normalized_config}' (job: {item.get('job_id')})")
+        
+        # Case-insensitive comparison
+        if normalized_config == normalized_key:
+            matching_job = item
+            print(f"✅ Match found! Job ID: {item.get('job_id', 'unknown')}")
             break
 
-    # Handle unmapped/new file - MOVE TO data/new_files/
+    # Handle unmapped file
     if not matching_job:
-        print("No matching job found - this is a NEW file")
+        print("No matching job found - moving to data/new_files/")
         
-        # Move file to data/new_files/ prefix
         new_location = move_to_new_file(bucket, key)
         
-        # Send notification
         send_notification(
             SNS_TOPIC_ARN,
             "New File Uploaded - Moved to data/new_files/",
@@ -219,14 +162,11 @@ def lambda_handler(event, context):
             f"File has been moved to data/new_files/ folder.\n\n"
             f"Original Location: {key}\n"
             f"New Location: {new_location}\n"
-            f"File: {file_name}\n"
             f"Bucket: {bucket}\n\n"
-            f"This is a NEW file that needs configuration.\n\n"
             f"Action needed:\n"
             f"1. Review the file in data/new_files/ folder\n"
             f"2. Add configuration to config.json\n"
-            f"3. Move file to data/in/ to process\n\n"
-            f"Searched {len(config_jobs)} job configs."
+            f"3. Move file to data/in/ to process"
         )
         
         return {
@@ -236,35 +176,33 @@ def lambda_handler(event, context):
             "reason": "unmapped"
         }
 
-    # Handle inactive job - DON'T move, just notify
+    # Handle inactive job
     if not matching_job.get("is_active", False):
         print("Job is inactive")
         
-        # DON'T move file, just send notification
         send_notification(
             SNS_TOPIC_ARN,
             "File Upload Skipped - Inactive Job",
             f"File uploaded but job is currently inactive.\n"
             f"File remains in data/in/ folder.\n\n"
-            f"File: {file_name}\n"
             f"Location: {key}\n"
-            f"Job ID: {matching_job['job_id']}\n"
-            f"Job Name: {matching_job['job_name']}\n"
-            f"Config: {matching_job.get('_config_source', 'unknown')}\n\n"
+            f"Job ID: {matching_job.get('job_id', 'unknown')}\n"
+            f"Job Name: {matching_job.get('job_name', 'unknown')}\n\n"
             f"Action needed:\n"
-            f"- Set is_active to true in the config file\n"
-            f"- File will automatically process once job is activated"
+            f"- Set is_active to true in the config file"
         )
         
         return {
             "message": "Job inactive - file remains in data/in/",
-            "file": file_name,
             "location": key,
-            "job_id": matching_job["job_id"]
+            "job_id": matching_job.get("job_id", "unknown")
         }
 
     # Trigger Step Functions for active job
-    safe_name = sanitize_execution_name(normalized_file)
+    print("Job is active - triggering Step Functions")
+    
+    file_name = key.split("/")[-1]
+    safe_name = sanitize_execution_name(key)
     timestamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
     execution_name = f"run-{safe_name}-{timestamp}"
 
@@ -284,7 +222,7 @@ def lambda_handler(event, context):
         return {
             "message": "Job triggered",
             "file": file_name,
-            "job_id": matching_job["job_id"],
+            "job_id": matching_job.get("job_id", "unknown"),
             "execution": execution_name
         }
         
